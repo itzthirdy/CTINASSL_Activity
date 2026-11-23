@@ -8,5 +8,5 @@ export async function connectDatabase(): Promise<void> {
   }
 
   await mongoose.connect(uri);
-  console.log("MongoDB connected");
+  console.log("MongoDB connected (Sole Purpose)");
 }

@@ -9,7 +9,7 @@ async function startServer(): Promise<void> {
     await connectDatabase();
 
     app.listen(port, () => {
-      console.log(`API running on http://localhost:${port}`);
+      console.log(`Sole Purpose API running on http://localhost:${port}`);
     });
   } catch (error) {
     console.error("Failed to start backend:", error);
