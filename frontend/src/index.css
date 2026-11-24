@@ -1,25 +1,26 @@
 @import "tailwindcss";
 
 @theme {
-  --font-editorial: "Fraunces", Georgia, serif;
-  --font-kinetic: "Barlow Condensed", system-ui, sans-serif;
+  --font-sport: "Russo One", "Barlow Condensed", system-ui, sans-serif;
+  --font-condensed: "Barlow Condensed", "Teko", system-ui, sans-serif;
+  --font-display: "Syne", "Plus Jakarta Sans", system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-sp-canvas: #FAF9F7;
-  --color-sp-surface: #FFFFFF;
-  --color-sp-pedestal: #F3F2EF;
-  --color-sp-border: #E6E3DD;
-  --color-sp-ink: #181715;
-  --color-sp-muted: #6B6863;
-  --color-sp-meta: #9A958E;
-  --color-sp-taupe: #6F5D4E;
+  --color-sp-obsidian: #070709;
+  --color-sp-stage: #0c0d12;
+  --color-sp-surface: #ffffff;
+  --color-sp-pedestal: #f5f5f5;
+  --color-sp-border: #e5e5e5;
+  --color-sp-ink: #111111;
+  --color-sp-muted: #707072;
+  --color-sp-bestseller: #d33918;
 }
 
 @layer base {
   html {
-    background-color: #FAF9F7;
-    color: #181715;
+    background-color: #070709;
+    color: #ffffff;
     font-family: var(--font-sans);
     scroll-behavior: smooth;
   }
@@ -27,13 +28,72 @@
   body {
     margin: 0;
     min-height: 100vh;
-    background-color: #FAF9F7;
-    color: #181715;
+    background-color: #070709;
+    color: #ffffff;
     overflow-x: hidden;
   }
+}
+
+.font-sport {
+  font-family: var(--font-sport);
+}
+
+.font-condensed {
+  font-family: var(--font-condensed);
+}
+
+.font-display {
+  font-family: var(--font-display);
 }
 
 .font-mono-tabular {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* Luxury Hero Metallic Typography matching reference homepage.webp */
+.metallic-hero-text {
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #e4e4e7 38%,
+    #9ca3af 72%,
+    #52525b 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 3D Cylinder Turntable Plate Styling inspired by 360 Car.mp4 */
+.cylinder-stage-perspective {
+  perspective: 1400px;
+}
+
+.cylinder-top-surface {
+  background: radial-gradient(
+    ellipse 65% 58% at 50% 48%,
+    rgba(38, 42, 58, 0.92) 0%,
+    rgba(19, 21, 30, 0.96) 58%,
+    rgba(9, 10, 15, 0.99) 85%,
+    rgba(120, 140, 255, 0.22) 100%
+  );
+  box-shadow:
+    0 0 50px rgba(99, 102, 241, 0.16),
+    inset 0 0 35px rgba(255, 255, 255, 0.07),
+    inset 0 2px 6px rgba(255, 255, 255, 0.22);
+}
+
+.cylinder-side-wall {
+  background: linear-gradient(
+    90deg,
+    #07080c 0%,
+    #1a1d2a 24%,
+    #2f354d 50%,
+    #1a1d2a 76%,
+    #07080c 100%
+  );
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.95),
+    0 6px 28px rgba(99, 102, 241, 0.18);
 }
