@@ -7,8 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Heart,
-  Pause,
-  Play,
   Ruler,
   Star,
   Trash2,
@@ -24,6 +22,7 @@ import {
   buildShoeRoomGradientCss,
   formatPHP,
   getAvailableAngles,
+  getModelColorways,
 } from "../data/shoeCatalog";
 import type { AngleKey, FeaturedShoe } from "../data/shoeCatalog";
 import type { AppUser } from "../services/api";
@@ -213,7 +212,6 @@ export function ProductDetailPage({
     const idx = availableAngles.findIndex((o) => o.key === initialAngle);
     return idx >= 0 ? idx : 0;
   });
-  const [isTurntablePlaying, setIsTurntablePlaying] = useState(false);
   const [selectedSize, setSelectedSize] = useState<string>(
     () => shoe.sizes[2] ?? shoe.sizes[0] ?? "US 9"
   );
@@ -246,19 +244,6 @@ export function ProductDetailPage({
     );
   }, [shoe.id, shoe.animationPreset]);
 
-  // Optional 360° Turntable auto-angle rotation
-  useEffect(() => {
-    if (!isTurntablePlaying || availableAngles.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setActiveAngleIdx((prev) => (prev + 1) % availableAngles.length);
-      playShoePresetAnimation(
-        primaryImgRef.current,
-        shoe.animationPreset ?? "studio-float"
-      );
-    }, 1450);
-    return () => window.clearInterval(timer);
-  }, [isTurntablePlaying, availableAngles.length, shoe.animationPreset]);
-
   const primaryAngleOption =
     availableAngles[activeAngleIdx % availableAngles.length] ??
     availableAngles[0];
@@ -276,7 +261,6 @@ export function ProductDetailPage({
   );
 
   const switchAngleIndex = (nextIdx: number) => {
-    setIsTurntablePlaying(false);
     const wrapped =
       ((nextIdx % availableAngles.length) + availableAngles.length) %
       availableAngles.length;
@@ -313,7 +297,9 @@ export function ProductDetailPage({
   };
 
   const reviews = shoe.reviews ?? [];
-  const otherShoes = allProducts.filter((s) => s.id !== shoe.id);
+  const sameModelColorways = getModelColorways(shoe, allProducts);
+  const colorwayIds = new Set(sameModelColorways.map((c) => c.id));
+  const otherShoes = allProducts.filter((s) => !colorwayIds.has(s.id));
 
   const scrollRecommendations = (dir: -1 | 1) => {
     recommendRowRef.current?.scrollBy({ left: dir * 420, behavior: "smooth" });
@@ -370,7 +356,7 @@ export function ProductDetailPage({
           </div>
 
           <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-12 lg:gap-12">
-            {/* LEFT COLUMN: All Uploaded Angles + 3D Tilt + 360° Turntable */}
+            {/* LEFT COLUMN: All Uploaded Angles + 3D Tilt */}
             <div className="flex flex-col-reverse gap-4 sm:flex-row lg:sticky lg:top-24 lg:col-span-7">
               <div className="flex flex-row gap-2.5 overflow-x-auto pb-1 sm:flex-col sm:overflow-visible sm:pb-0">
                 {availableAngles.map((opt, idx) => (
@@ -418,26 +404,6 @@ export function ProductDetailPage({
                       background: `radial-gradient(ellipse, rgba(${shoe.glowRgb}, 0.7) 0%, transparent 72%)`,
                     }}
                   />
-
-                  {availableAngles.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setIsTurntablePlaying((v) => !v)}
-                      className="absolute top-4 right-4 z-20 inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-white/25 bg-black/45 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur-md transition hover:border-white hover:bg-white hover:text-black"
-                    >
-                      {isTurntablePlaying ? (
-                        <>
-                          <Pause className="h-3.5 w-3.5" />
-                          <span>Pause 360°</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play className="h-3.5 w-3.5" />
-                          <span>360° Turntable</span>
-                        </>
-                      )}
-                    </button>
-                  )}
 
                   <img
                     ref={primaryImgRef}
@@ -567,16 +533,16 @@ export function ProductDetailPage({
                   </span>
                 </div>
 
-                {allProducts.length > 1 && (
+                {sameModelColorways.length > 1 && (
                   <div className="mt-6">
                     <p className="mb-2.5 text-xs font-medium text-white/80">
-                      Select Release:{" "}
+                      Select Colorway:{" "}
                       <span className="font-semibold text-white">
                         {shoe.colorwayName}
                       </span>
                     </p>
                     <div className="flex flex-wrap gap-2.5">
-                      {allProducts.map((item) => (
+                      {sameModelColorways.map((item) => (
                         <ColorwaySwatchTile
                           key={item.id}
                           shoe={item}

@@ -580,9 +580,10 @@ export function App() {
                     notify("Starter demo shoes loaded", "success");
                   }}
                   onCreateProduct={async (data) => {
-                    await storeApi.createProduct(data);
+                    const created = await storeApi.createProduct(data);
                     setProducts(await storeApi.getProducts());
                     notify(`${data.name} added to store!`, "success");
+                    return created;
                   }}
                   onUpdateProduct={async (shoeId, updates) => {
                     const next = await storeApi.updateProduct(shoeId, updates);

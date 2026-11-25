@@ -98,6 +98,21 @@ interface HydratedReview {
   date: string;
 }
 
+function deriveModelGroup(name: string): string {
+  const cleaned = name
+    .replace(/\s*'[^']*'\s*/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return (
+    cleaned ||
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+  );
+}
+
 async function attachProductReviews(products: IProduct[]) {
   if (products.length === 0) return [];
   const productIds = products.map((p) => p._id);
@@ -126,6 +141,8 @@ async function attachProductReviews(products: IProduct[]) {
     const plain = p.toObject();
     return {
       ...plain,
+      modelGroup: p.modelGroup || deriveModelGroup(p.name),
+      parentProductId: p.parentProductId ? String(p.parentProductId) : null,
       createdBy: p.createdBy ? String(p.createdBy) : null,
       reviews: grouped.get(String(p._id)) ?? [],
     };
@@ -725,6 +742,14 @@ router.post(
       }
     }
 
+    const cGold = await ProductModel.findOne({ id: "caitlin-1-ep-gold" });
+    const cRoyal = await ProductModel.findOne({ id: "caitlin-1-ep-royal" });
+    if (cGold && cRoyal && !cRoyal.parentProductId) {
+      cRoyal.parentProductId = cGold._id;
+      cRoyal.modelGroup = cGold.modelGroup || "caitlin-1-ep";
+      await cRoyal.save();
+    }
+
     await recordAudit({
       actorUserId: adminUser._id,
       actorUsername: adminUser.username,
@@ -762,8 +787,32 @@ router.post(
       unknown
     >;
 
+    let resolvedParentId: Types.ObjectId | null = null;
+    let resolvedModelGroup =
+      typeof cleanBody.modelGroup === "string" && cleanBody.modelGroup.trim()
+        ? cleanBody.modelGroup.trim()
+        : deriveModelGroup(String(cleanBody.name));
+
+    if (
+      typeof cleanBody.parentProductId === "string" &&
+      mongoose.isValidObjectId(cleanBody.parentProductId)
+    ) {
+      const parentDoc = await ProductModel.findById(cleanBody.parentProductId);
+      if (parentDoc) {
+        resolvedParentId = parentDoc._id;
+        resolvedModelGroup =
+          parentDoc.modelGroup || deriveModelGroup(parentDoc.name);
+        if (!parentDoc.modelGroup) {
+          parentDoc.modelGroup = resolvedModelGroup;
+          await parentDoc.save();
+        }
+      }
+    }
+
     const payload = {
       ...cleanBody,
+      modelGroup: resolvedModelGroup,
+      parentProductId: resolvedParentId,
       createdBy: adminUser._id,
       id:
         cleanBody.id ||
@@ -800,6 +849,29 @@ router.put(
     const adminUser = req.authUser!;
     const { reviews: _ignoredReviews, ...updates } = (req.body ??
       {}) as Record<string, unknown>;
+
+    if ("parentProductId" in updates) {
+      const rawParent = updates.parentProductId;
+      if (!rawParent) {
+        updates.parentProductId = null;
+      } else if (
+        typeof rawParent === "string" &&
+        mongoose.isValidObjectId(rawParent)
+      ) {
+        const parentDoc = await ProductModel.findById(rawParent);
+        if (parentDoc) {
+          updates.parentProductId = parentDoc._id;
+          updates.modelGroup =
+            parentDoc.modelGroup || deriveModelGroup(parentDoc.name);
+          if (!parentDoc.modelGroup) {
+            parentDoc.modelGroup = String(updates.modelGroup);
+            await parentDoc.save();
+          }
+        }
+      } else {
+        delete updates.parentProductId;
+      }
+    }
 
     const updated = await ProductModel.findOneAndUpdate(
       { id: req.params.id },

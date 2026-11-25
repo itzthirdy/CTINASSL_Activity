@@ -28,6 +28,8 @@ export interface IProduct extends Document {
   animationPreset: AnimationPresetType;
   cutoutSensitivity: number;
   sizes: string[];
+  modelGroup: string;
+  parentProductId?: Types.ObjectId | null;
   createdBy?: Types.ObjectId | null;
   angles: {
     lateral: string;
@@ -77,6 +79,18 @@ const ProductSchema = new Schema<IProduct>(
     sizes: {
       type: [String],
       default: ["US 7", "US 8", "US 9", "US 10", "US 11"],
+    },
+    modelGroup: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
+    parentProductId: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      default: null,
+      index: true,
     },
     createdBy: {
       type: Schema.Types.ObjectId,

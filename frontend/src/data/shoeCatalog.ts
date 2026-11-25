@@ -73,8 +73,11 @@ export interface ShoeReview {
 }
 
 export interface FeaturedShoe {
+  _id?: string;
   id: string;
   sku: string;
+  modelGroup?: string;
+  parentProductId?: string | null;
   badge: string;
   name: string;
   colorwayName: string;
@@ -95,6 +98,44 @@ export interface FeaturedShoe {
   angles: ShoeAngleSet;
   turntableSequence?: AngleKey[];
   reviews?: ShoeReview[];
+}
+
+export function deriveModelGroupKey(name: string): string {
+  const cleaned = name
+    .replace(/\s*'[^']*'\s*/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return (
+    cleaned ||
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+  );
+}
+
+export function getModelColorways(
+  shoe: FeaturedShoe,
+  allProducts: FeaturedShoe[]
+): FeaturedShoe[] {
+  const shoeGroup = shoe.modelGroup?.trim() || deriveModelGroupKey(shoe.name);
+  return allProducts.filter((candidate) => {
+    if (candidate.id === shoe.id) return true;
+    const candGroup =
+      candidate.modelGroup?.trim() || deriveModelGroupKey(candidate.name);
+    if (shoeGroup && candGroup === shoeGroup) return true;
+    if (shoe._id && candidate.parentProductId === shoe._id) return true;
+    if (candidate._id && shoe.parentProductId === candidate._id) return true;
+    if (
+      shoe.parentProductId &&
+      candidate.parentProductId &&
+      shoe.parentProductId === candidate.parentProductId
+    ) {
+      return true;
+    }
+    return false;
+  });
 }
 
 export function getAvailableAngles(shoe: FeaturedShoe): AngleOption[] {
@@ -149,6 +190,7 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
   {
     id: "ja-4-heat-check-ep",
     sku: "SLP-JA4-HC01",
+    modelGroup: "ja-4-ep",
     badge: "Bestseller",
     name: "Ja 4 'Heat Check' EP",
     colorwayName: "Thermal Violet / University Gold / Obsidian",
@@ -191,6 +233,7 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
   {
     id: "caitlin-1-ep-gold",
     sku: "SLP-CC1-AU22",
+    modelGroup: "caitlin-1-ep",
     badge: "Promo Exclusion",
     name: "Caitlin 1 EP 'Amarillo'",
     colorwayName: "Amarillo Gold / Baltic Blue / Emerald Spark",
@@ -233,6 +276,7 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
   {
     id: "caitlin-1-ep-royal",
     sku: "SLP-CC1-RY23",
+    modelGroup: "caitlin-1-ep",
     badge: "Promo Exclusion",
     name: "Caitlin 1 EP 'Hyper Royal'",
     colorwayName: "Hyper Royal / Metallic Silver / Sunset Pulse",

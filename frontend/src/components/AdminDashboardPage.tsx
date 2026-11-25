@@ -26,6 +26,7 @@ import { playShoePresetAnimation } from "../animations/shoeAnimations";
 import {
   ANIMATION_PRESET_OPTIONS,
   buildShoeRoomGradientCss,
+  deriveModelGroupKey,
   formatPHP,
   SHOE_ANGLE_OPTIONS,
 } from "../data/shoeCatalog";
@@ -72,7 +73,7 @@ interface AdminDashboardPageProps {
     files: Partial<Record<AngleKey, File>>
   ) => Promise<Partial<Record<AngleKey, string>>>;
   onSeedDemoProducts: () => Promise<void>;
-  onCreateProduct: (data: CreateShoeInput) => Promise<void>;
+  onCreateProduct: (data: CreateShoeInput) => Promise<FeaturedShoe>;
   onUpdateProduct: (
     shoeId: string,
     updates: Partial<FeaturedShoe>
@@ -104,6 +105,7 @@ const SCHEMA_WIRING_NODES = [
     pk: "_id (ObjectId)",
     links: [
       "createdBy → users._id",
+      "parentProductId → products._id (colorways)",
       "baskets.items[].productId → _id",
       "orders.items[].productId → _id",
       "reviews.productId → _id (1:N)",
@@ -174,6 +176,74 @@ function rgbTupleToHex(rgb: [number, number, number]): string {
       .toString(16)
       .padStart(2, "0");
   return `#${h(rgb[0])}${h(rgb[1])}${h(rgb[2])}`;
+}
+
+function buildMergedAngleSet(
+  uploadedUrls: Partial<Record<AngleKey, string>>,
+  existing?: Partial<Record<AngleKey, string>>
+): ShoeAngleSet {
+  return {
+    lateral: uploadedUrls.lateral ?? existing?.lateral ?? "",
+    pairAngle: uploadedUrls.pairAngle ?? existing?.pairAngle ?? "",
+    medial: uploadedUrls.medial ?? existing?.medial ?? "",
+    topDown: uploadedUrls.topDown ?? existing?.topDown ?? "",
+    outsole: uploadedUrls.outsole ?? existing?.outsole ?? "",
+    heel: uploadedUrls.heel ?? existing?.heel ?? "",
+  };
+}
+
+function AngleUploadGrid({
+  localPreviews,
+  savedAngles,
+  onSelectFile,
+}: {
+  localPreviews: Partial<Record<AngleKey, string>>;
+  savedAngles?: Partial<Record<AngleKey, string>>;
+  onSelectFile: (angleKey: AngleKey, file: File | null) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      {SHOE_ANGLE_OPTIONS.map((opt) => {
+        const isReq = opt.key === "lateral";
+        const preview =
+          localPreviews[opt.key] ||
+          (savedAngles?.[opt.key] ? resolveAssetUrl(savedAngles[opt.key]!) : "");
+        return (
+          <label
+            key={opt.key}
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed p-2.5 text-center transition ${
+              preview
+                ? "border-emerald-400/50 bg-emerald-500/10"
+                : isReq
+                  ? "border-amber-400/60 bg-amber-400/5 hover:border-amber-300"
+                  : "border-white/20 bg-white/[0.02] hover:border-white/40"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".avif,.png,.jpg,.jpeg,.webp,image/avif,image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) =>
+                onSelectFile(opt.key, e.target.files?.[0] ?? null)
+              }
+            />
+            {preview ? (
+              <img
+                src={preview}
+                alt={opt.label}
+                className="h-12 w-full rounded bg-[#F5F5F5] object-contain p-1"
+              />
+            ) : (
+              <Upload className="h-4 w-4 text-zinc-400" />
+            )}
+            <span className="mt-1.5 text-[11px] font-semibold text-white">
+              {opt.label} {isReq ? "*" : ""}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
 }
 
 export function AdminDashboardPage({
@@ -248,6 +318,13 @@ export function AdminDashboardPage({
   const [sAngles, setSAngles] = useState<Partial<Record<AngleKey, string>>>({});
   const [pendingFiles, setPendingFiles] = useState<Partial<Record<AngleKey, File>>>({});
   const [localPreviews, setLocalPreviews] = useState<Partial<Record<AngleKey, string>>>({});
+  const [sParentProductId, setSParentProductId] = useState<string>("");
+  const [sModelGroup, setSModelGroup] = useState<string>("");
+  const [addSecondColorway, setAddSecondColorway] = useState(false);
+  const [s2Colorway, setS2Colorway] = useState("");
+  const [s2Stock, setS2Stock] = useState("10");
+  const [s2PendingFiles, setS2PendingFiles] = useState<Partial<Record<AngleKey, File>>>({});
+  const [s2LocalPreviews, setS2LocalPreviews] = useState<Partial<Record<AngleKey, string>>>({});
   const [shoeFormError, setShoeFormError] = useState<string | null>(null);
   const [isSavingShoe, setIsSavingShoe] = useState(false);
 
@@ -402,35 +479,72 @@ export function AdminDashboardPage({
   };
 
   const resetShoeModalFiles = () => {
-    Object.values(localPreviews).forEach((url) => {
-      if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-    });
+    [...Object.values(localPreviews), ...Object.values(s2LocalPreviews)].forEach(
+      (url) => {
+        if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+      }
+    );
     setPendingFiles({});
     setLocalPreviews({});
+    setS2PendingFiles({});
+    setS2LocalPreviews({});
     setShoeFormError(null);
   };
 
-  const openCreateShoeModal = () => {
+  const applyParentModelPreset = (parentShoe: FeaturedShoe | null) => {
+    if (!parentShoe) {
+      setSParentProductId("");
+      setSModelGroup("");
+      return;
+    }
+    setSParentProductId(parentShoe._id ?? parentShoe.id);
+    setSModelGroup(
+      parentShoe.modelGroup || deriveModelGroupKey(parentShoe.name)
+    );
+    setAddSecondColorway(false);
+    if (!sName.trim()) setSName(parentShoe.name);
+    setSCategory(parentShoe.category);
+    setSPrice(String(parentShoe.price));
+    setSBadge(parentShoe.badge);
+    setSHeroWord(parentShoe.heroWord || "VELOCITY");
+    if (!sDescription.trim()) setSDescription(parentShoe.description || "");
+    if (parentShoe.sizes?.length) setSSizes(parentShoe.sizes);
+  };
+
+  const openCreateShoeModal = (parentShoe?: FeaturedShoe) => {
     resetShoeModalFiles();
     setEditingShoe(null);
     setIsCreatingShoe(true);
-    setSName("");
+    setSName(parentShoe ? parentShoe.name : "");
     setSColorway("");
-    setSCategory("Basketball Shoes");
-    setSPrice("6995");
+    setSCategory(parentShoe ? parentShoe.category : "Basketball Shoes");
+    setSPrice(parentShoe ? String(parentShoe.price) : "6995");
     setSStock("12");
-    setSBadge("New Release");
-    setSHeroWord("VELOCITY");
-    setSTagline("");
-    setSDescription("");
+    setSBadge(parentShoe ? parentShoe.badge : "New Release");
+    setSHeroWord(parentShoe?.heroWord || "VELOCITY");
+    setSTagline(parentShoe?.tagline || "");
+    setSDescription(parentShoe?.description || "");
     setSFeaturedInHero(true);
-    setSPreset("studio-float");
-    setSSensitivity(50);
+    setSPreset(parentShoe?.animationPreset ?? "studio-float");
+    setSSensitivity(parentShoe?.cutoutSensitivity ?? 50);
     setSRoomRgb([52, 56, 72]);
     setSAccentHex("#F59E0B");
     setSGlowRgb("245, 158, 11");
-    setSSizes(["US 7", "US 8", "US 9", "US 10", "US 11"]);
+    setSSizes(
+      parentShoe?.sizes?.length
+        ? parentShoe.sizes
+        : ["US 7", "US 8", "US 9", "US 10", "US 11"]
+    );
     setSAngles({});
+    setSParentProductId(parentShoe ? (parentShoe._id ?? parentShoe.id) : "");
+    setSModelGroup(
+      parentShoe
+        ? parentShoe.modelGroup || deriveModelGroupKey(parentShoe.name)
+        : ""
+    );
+    setAddSecondColorway(false);
+    setS2Colorway("");
+    setS2Stock("10");
   };
 
   const openEditShoeModal = (shoe: FeaturedShoe) => {
@@ -454,6 +568,11 @@ export function AdminDashboardPage({
     setSGlowRgb(shoe.glowRgb || "245, 158, 11");
     setSSizes(shoe.sizes?.length ? shoe.sizes : ["US 8", "US 9", "US 10"]);
     setSAngles({ ...shoe.angles });
+    setSParentProductId(shoe.parentProductId ?? "");
+    setSModelGroup(shoe.modelGroup || deriveModelGroupKey(shoe.name));
+    setAddSecondColorway(false);
+    setS2Colorway("");
+    setS2Stock("10");
   };
 
   const handleSelectAngleFile = async (angleKey: AngleKey, file: File | null) => {
@@ -470,6 +589,17 @@ export function AdminDashboardPage({
       setSAccentHex(palette.accentHex);
       setSGlowRgb(palette.glowRgb);
     }
+  };
+
+  const handleSelectSecondAngleFile = (
+    angleKey: AngleKey,
+    file: File | null
+  ) => {
+    if (!file) return;
+    setShoeFormError(null);
+    const previewUrl = URL.createObjectURL(file);
+    setS2PendingFiles((prev) => ({ ...prev, [angleKey]: file }));
+    setS2LocalPreviews((prev) => ({ ...prev, [angleKey]: previewUrl }));
   };
 
   const handleReExtractPalette = async () => {
@@ -496,21 +626,32 @@ export function AdminDashboardPage({
       return;
     }
 
+    if (!editingShoe && addSecondColorway) {
+      if (!s2Colorway.trim()) {
+        setShoeFormError("2nd Colorway Name is required.");
+        return;
+      }
+      if (!s2PendingFiles.lateral) {
+        setShoeFormError("2nd Colorway Lateral Profile photo is required.");
+        return;
+      }
+    }
+
     setIsSavingShoe(true);
     try {
       const uploadedUrls = await onUploadShoeAngles(pendingFiles);
-      const mergedAngles: ShoeAngleSet = {
-        lateral: uploadedUrls.lateral ?? sAngles.lateral ?? "",
-        pairAngle: uploadedUrls.pairAngle ?? sAngles.pairAngle ?? "",
-        medial: uploadedUrls.medial ?? sAngles.medial ?? "",
-        topDown: uploadedUrls.topDown ?? sAngles.topDown ?? "",
-        outsole: uploadedUrls.outsole ?? sAngles.outsole ?? "",
-        heel: uploadedUrls.heel ?? sAngles.heel ?? "",
-      };
+      const mergedAngles = buildMergedAngleSet(uploadedUrls, sAngles);
+      const resolvedModelGroup =
+        sModelGroup.trim() || deriveModelGroupKey(sName.trim());
+      const resolvedParentObj = products.find(
+        (p) => (p._id ?? p.id) === sParentProductId
+      );
 
       const payload: CreateShoeInput = {
         name: sName.trim(),
         colorwayName: sColorway.trim(),
+        modelGroup: resolvedModelGroup,
+        parentProductId: resolvedParentObj?._id ?? null,
         category: sCategory,
         price: Number(sPrice),
         stock: Number(sStock),
@@ -532,7 +673,29 @@ export function AdminDashboardPage({
         await onUpdateProduct(editingShoe.id, payload);
         setEditingShoe(null);
       } else {
-        await onCreateProduct(payload);
+        const createdFirst = await onCreateProduct(payload);
+        if (addSecondColorway && s2PendingFiles.lateral) {
+          const uploadedSecondUrls = await onUploadShoeAngles(s2PendingFiles);
+          const secondAngles = buildMergedAngleSet(uploadedSecondUrls);
+          const secondPalette = s2LocalPreviews.lateral
+            ? await extractShoeColorPalette(
+                s2LocalPreviews.lateral,
+                sSensitivity
+              )
+            : { roomRgb: sRoomRgb, accentHex: sAccentHex, glowRgb: sGlowRgb };
+
+          await onCreateProduct({
+            ...payload,
+            colorwayName: s2Colorway.trim(),
+            stock: Number(s2Stock),
+            modelGroup: createdFirst.modelGroup || resolvedModelGroup,
+            parentProductId: createdFirst._id ?? null,
+            roomRgb: secondPalette.roomRgb,
+            accentHex: secondPalette.accentHex,
+            glowRgb: secondPalette.glowRgb,
+            angles: secondAngles,
+          });
+        }
         setIsCreatingShoe(false);
       }
       resetShoeModalFiles();
@@ -1007,7 +1170,7 @@ export function AdminDashboardPage({
 
                   <button
                     type="button"
-                    onClick={openCreateShoeModal}
+                    onClick={() => openCreateShoeModal()}
                     className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs font-bold tracking-wider text-black uppercase transition hover:bg-amber-300"
                   >
                     <Plus className="h-4 w-4" />
@@ -1117,6 +1280,14 @@ export function AdminDashboardPage({
                           </td>
                           <td className="py-3.5 text-right">
                             <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openCreateShoeModal(shoe)}
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-amber-400/35 bg-amber-400/10 px-3 py-1.5 text-xs font-semibold text-amber-200 transition hover:bg-amber-400 hover:text-black"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                <span>Colorway</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => openEditShoeModal(shoe)}
@@ -1598,6 +1769,35 @@ export function AdminDashboardPage({
 
               {/* RIGHT: Shoe Details, Animation Controls & Multi-Angle Uploads */}
               <div className="space-y-3.5 text-xs lg:col-span-7">
+                {products.length > 0 && (
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Link as Colorway of Existing Shoe Model (Optional)
+                    </label>
+                    <select
+                      value={sParentProductId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const found =
+                          products.find((p) => (p._id ?? p.id) === val) ?? null;
+                        applyParentModelPreset(found);
+                      }}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                    >
+                      <option value="">
+                        Standalone New Shoe Model (No parent link)
+                      </option>
+                      {products
+                        .filter((p) => !editingShoe || p.id !== editingShoe.id)
+                        .map((p) => (
+                          <option key={p.id} value={p._id ?? p.id}>
+                            {p.name} ({p.colorwayName})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="block font-medium text-zinc-300">
@@ -1764,53 +1964,74 @@ export function AdminDashboardPage({
                     Shoe Angle Photos (Lateral Profile shown in Shop; all
                     uploaded angles shown in Detail View)
                   </p>
-                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                    {SHOE_ANGLE_OPTIONS.map((opt) => {
-                      const isReq = opt.key === "lateral";
-                      const preview =
-                        localPreviews[opt.key] ||
-                        (sAngles[opt.key]
-                          ? resolveAssetUrl(sAngles[opt.key]!)
-                          : "");
-                      return (
-                        <label
-                          key={opt.key}
-                          className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed p-2.5 text-center transition ${
-                            preview
-                              ? "border-emerald-400/50 bg-emerald-500/10"
-                              : isReq
-                                ? "border-amber-400/60 bg-amber-400/5 hover:border-amber-300"
-                                : "border-white/20 bg-white/[0.02] hover:border-white/40"
-                          }`}
-                        >
-                          <input
-                            type="file"
-                            accept=".avif,.png,.jpg,.jpeg,.webp,image/avif,image/png,image/jpeg,image/webp"
-                            className="hidden"
-                            onChange={(e) =>
-                              void handleSelectAngleFile(
-                                opt.key,
-                                e.target.files?.[0] ?? null
-                              )
-                            }
-                          />
-                          {preview ? (
-                            <img
-                              src={preview}
-                              alt={opt.label}
-                              className="h-12 w-full rounded bg-[#F5F5F5] object-contain p-1"
-                            />
-                          ) : (
-                            <Upload className="h-4 w-4 text-zinc-400" />
-                          )}
-                          <span className="mt-1.5 text-[11px] font-semibold text-white">
-                            {opt.label} {isReq ? "*" : ""}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
+                  <AngleUploadGrid
+                    localPreviews={localPreviews}
+                    savedAngles={sAngles}
+                    onSelectFile={(key, file) =>
+                      void handleSelectAngleFile(key, file)
+                    }
+                  />
                 </div>
+
+                {!editingShoe && !sParentProductId && (
+                  <div className="rounded-2xl border border-white/15 bg-black/40 p-3.5">
+                    <label className="flex cursor-pointer items-center justify-between gap-2">
+                      <span className="font-semibold text-amber-200">
+                        + Add a 2nd Colorway Version for this Shoe
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={addSecondColorway}
+                        onChange={(e) => setAddSecondColorway(e.target.checked)}
+                        className="accent-amber-400"
+                      />
+                    </label>
+
+                    {addSecondColorway && (
+                      <div className="mt-3 space-y-3 border-t border-white/10 pt-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div className="sm:col-span-2">
+                            <label className="block font-medium text-zinc-300">
+                              2nd Colorway Name *
+                            </label>
+                            <input
+                              type="text"
+                              required={addSecondColorway}
+                              value={s2Colorway}
+                              onChange={(e) => setS2Colorway(e.target.value)}
+                              placeholder="e.g. Triple Black / Crimson"
+                              className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-medium text-zinc-300">
+                              Stock *
+                            </label>
+                            <input
+                              type="number"
+                              required={addSecondColorway}
+                              min={0}
+                              value={s2Stock}
+                              onChange={(e) => setS2Stock(e.target.value)}
+                              className="font-mono-tabular mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-[11px] font-medium text-zinc-300">
+                            2nd Colorway Photos (Lateral Profile required; room
+                            color auto-extracted from photo)
+                          </p>
+                          <AngleUploadGrid
+                            localPreviews={s2LocalPreviews}
+                            onSelectFile={handleSelectSecondAngleFile}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block font-medium text-zinc-300">

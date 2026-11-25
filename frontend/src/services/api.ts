@@ -95,6 +95,8 @@ export interface OrderRecord {
 export interface CreateShoeInput {
   name: string;
   colorwayName: string;
+  modelGroup?: string;
+  parentProductId?: string | null;
   category: Exclude<ShoeCategory, "All Shoes">;
   price: number;
   stock: number;
@@ -613,6 +615,8 @@ export const storeApi = {
       badge: input.badge?.trim() || "New Release",
       name: input.name.trim(),
       colorwayName: input.colorwayName.trim(),
+      modelGroup: input.modelGroup,
+      parentProductId: input.parentProductId ?? null,
       category: input.category,
       price: Number(input.price),
       stock: Number(input.stock),

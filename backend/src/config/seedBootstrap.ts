@@ -10,6 +10,7 @@ export const STARTER_DEMO_SHOES = [
   {
     id: "ja-4-heat-check-ep",
     sku: "SLP-JA4-HC01",
+    modelGroup: "ja-4-ep",
     badge: "Bestseller",
     name: "Ja 4 'Heat Check' EP",
     colorwayName: "Thermal Violet / University Gold / Obsidian",
@@ -49,6 +50,7 @@ export const STARTER_DEMO_SHOES = [
   {
     id: "caitlin-1-ep-gold",
     sku: "SLP-CC1-AU22",
+    modelGroup: "caitlin-1-ep",
     badge: "Promo Exclusion",
     name: "Caitlin 1 EP 'Amarillo'",
     colorwayName: "Amarillo Gold / Baltic Blue / Emerald Spark",
@@ -88,6 +90,7 @@ export const STARTER_DEMO_SHOES = [
   {
     id: "caitlin-1-ep-royal",
     sku: "SLP-CC1-RY23",
+    modelGroup: "caitlin-1-ep",
     badge: "Promo Exclusion",
     name: "Caitlin 1 EP 'Hyper Royal'",
     colorwayName: "Hyper Royal / Metallic Silver / Sunset Pulse",
@@ -212,6 +215,25 @@ export async function ensureSeedDatabase(): Promise<void> {
     console.log(
       `Seeded ${seededProducts.length} starter products linked to admin user.`
     );
+  }
+
+  // Idempotently ensure starter modelGroup & parentProductId colorway links exist
+  const starterGroupById = new Map(
+    STARTER_DEMO_SHOES.map((s) => [s.id, s.modelGroup])
+  );
+  for (const prod of seededProducts) {
+    const starterGroup = starterGroupById.get(prod.id);
+    if (starterGroup && !prod.modelGroup) {
+      prod.modelGroup = starterGroup;
+      await prod.save();
+    }
+  }
+  const caitlinGold = seededProducts.find((p) => p.id === "caitlin-1-ep-gold");
+  const caitlinRoyal = seededProducts.find((p) => p.id === "caitlin-1-ep-royal");
+  if (caitlinGold && caitlinRoyal && !caitlinRoyal.parentProductId) {
+    caitlinRoyal.parentProductId = caitlinGold._id;
+    caitlinRoyal.modelGroup = caitlinGold.modelGroup || "caitlin-1-ep";
+    await caitlinRoyal.save();
   }
 
   const primaryProduct = seededProducts[0];
