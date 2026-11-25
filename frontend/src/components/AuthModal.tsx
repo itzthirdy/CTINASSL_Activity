@@ -1,23 +1,57 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { animate } from "animejs";
-import { Lock, Mail, User, X } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  KeyRound,
+  Lock,
+  Mail,
+  ShieldCheck,
+  User,
+  X,
+} from "lucide-react";
+import { storeApi } from "../services/api";
+import type { AppUser } from "../services/api";
+
+export type AuthModalMode =
+  | "login"
+  | "register"
+  | "forgot-verify"
+  | "change-password-dashboard";
 
 interface AuthModalProps {
   isOpen: boolean;
+  initialMode?: AuthModalMode;
+  promptMessage?: string | null;
   onClose: () => void;
-  onLoginSuccess: (name: string) => void;
+  onAuthSuccess: (user: AppUser) => void;
 }
 
 export function AuthModal({
   isOpen,
+  initialMode = "login",
+  promptMessage,
   onClose,
-  onLoginSuccess,
+  onAuthSuccess,
 }: AuthModalProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
-  const [email, setEmail] = useState("athlete@solepurpose.ph");
-  const [password, setPassword] = useState("••••••••••••");
-  const [displayName, setDisplayName] = useState("Thirdy");
+  const [mode, setMode] = useState<AuthModalMode>(initialMode);
+
+  // Form states
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  // Forgot Password -> Change Password Dashboard states
+  const [resetEmail, setResetEmail] = useState("");
+  const [verifiedUsername, setVerifiedUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen && cardRef.current) {
@@ -33,10 +67,123 @@ export function AuthModal({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: FormEvent) => {
+  const switchMode = (nextMode: AuthModalMode) => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setMode(nextMode);
+    if (cardRef.current) {
+      animate(cardRef.current, {
+        translateY: [10, 0],
+        opacity: [0.7, 1],
+        duration: 300,
+        ease: "outExpo",
+      });
+    }
+  };
+
+  // 1. LOGIN (Username + Password ONLY — Email hidden for security)
+  const handleLoginSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    onLoginSuccess(displayName.trim() || "Athlete");
-    onClose();
+    setErrorMsg(null);
+    setIsSubmitting(true);
+    try {
+      const user = await storeApi.login(username, password);
+      onAuthSuccess(user);
+      onClose();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Sign in failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 2. REGISTER (CRUD Create: Username + Email + Password)
+  const handleRegisterSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (password.length < 4) {
+      setErrorMsg("Password must be at least 4 characters.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const user = await storeApi.register(username, email, password);
+      onAuthSuccess(user);
+      onClose();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Registration failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 3A. FORGOT PASSWORD STEP 1: Verify Email Exists
+  const handleVerifyEmailSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setIsSubmitting(true);
+    try {
+      const res = await storeApi.verifyEmailForReset(resetEmail);
+      setVerifiedUsername(res.username);
+      setNewPassword("");
+      setConfirmNewPassword("");
+      switchMode("change-password-dashboard");
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "No account found with that email address."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 3B. FORGOT PASSWORD STEP 2: Change Password Dashboard (CRUD Update)
+  const handleResetPasswordSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (newPassword.length < 4) {
+      setErrorMsg("New password must be at least 4 characters.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMsg("Passwords do not match.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const updatedUser = await storeApi.resetPasswordByEmail(
+        resetEmail,
+        newPassword
+      );
+      setUsername(updatedUser.username);
+      setPassword(newPassword);
+      setSuccessMsg(
+        `Password updated via CRUD for @${updatedUser.username}! You can now sign in.`
+      );
+      setTimeout(() => {
+        setMode("login");
+      }, 1100);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Failed to update password."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const fillDemoCustomer = () => {
+    setUsername("thirdy");
+    setPassword("sole123");
+    setErrorMsg(null);
+  };
+
+  const fillDemoAdmin = () => {
+    setUsername("admin");
+    setPassword("admin123");
+    setErrorMsg(null);
   };
 
   return (
@@ -47,7 +194,7 @@ export function AuthModal({
       <div
         ref={cardRef}
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-md rounded-3xl border border-white/15 bg-[#101118] p-7 text-white shadow-2xl"
+        className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/15 bg-[#101118] p-7 text-white shadow-2xl"
       >
         <button
           type="button"
@@ -57,74 +204,340 @@ export function AuthModal({
           <X className="h-4 w-4" />
         </button>
 
-        <div className="flex items-center">
-          <span className="font-sport text-xl tracking-wider uppercase italic">
-            SOLE PURPOSE{" "}
-            <span className="text-amber-300">MEMBER LOGIN</span>
-          </span>
-        </div>
-
-        <p className="mt-2 text-xs text-zinc-400">
-          Sign in to unlock member-only EP basketball drops and saved basket preferences.
-        </p>
-
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-zinc-300">
-              Member Name
-            </label>
-            <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
-              <User className="h-4 w-4 text-zinc-400" />
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                required
-                className="w-full bg-transparent text-sm text-white focus:outline-none"
-                placeholder="Your name"
-              />
-            </div>
+        {/* Optional Prompt Message when Guest clicks Add to Basket or Favourite */}
+        {promptMessage && (
+          <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-xs font-medium text-amber-200">
+            {promptMessage}
           </div>
+        )}
 
-          <div>
-            <label className="block text-xs font-medium text-zinc-300">
-              Email Address
-            </label>
-            <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
-              <Mail className="h-4 w-4 text-zinc-400" />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full bg-transparent text-sm text-white focus:outline-none"
-              />
-            </div>
+        {/* Top Mode Tabs for Login / Register */}
+        {(mode === "login" || mode === "register") && (
+          <div className="mb-5 grid grid-cols-2 gap-2 rounded-2xl bg-black/50 p-1">
+            <button
+              type="button"
+              onClick={() => switchMode("login")}
+              className={`cursor-pointer rounded-xl py-2 text-xs font-bold tracking-wider uppercase transition ${
+                mode === "login"
+                  ? "bg-white text-black shadow"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode("register")}
+              className={`cursor-pointer rounded-xl py-2 text-xs font-bold tracking-wider uppercase transition ${
+                mode === "register"
+                  ? "bg-white text-black shadow"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              Register
+            </button>
           </div>
+        )}
 
-          <div>
-            <label className="block text-xs font-medium text-zinc-300">
-              Password
-            </label>
-            <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
-              <Lock className="h-4 w-4 text-zinc-400" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full bg-transparent text-sm text-white focus:outline-none"
-              />
-            </div>
+        {/* Error & Success Alerts */}
+        {errorMsg && (
+          <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/15 px-3.5 py-2.5 text-xs font-medium text-red-200">
+            {errorMsg}
           </div>
+        )}
 
-          <button
-            type="submit"
-            className="mt-2 w-full cursor-pointer rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-amber-300 py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:brightness-110"
-          >
-            Sign In to Sole Purpose
-          </button>
-        </form>
+        {successMsg && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2.5 text-xs font-medium text-emerald-200">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
+        {/* MODE 1: LOGIN (Username + Password ONLY — no Email field) */}
+        {mode === "login" && (
+          <div>
+            <span className="font-sport text-xl tracking-wider uppercase italic">
+              SOLE PURPOSE <span className="text-amber-300">SIGN IN</span>
+            </span>
+            <p className="mt-1.5 text-xs text-zinc-400">
+              Sign in with your username and password to access your basket,
+              liked shoes, and checkout.
+            </p>
+
+            {/* Quick Demo Fill Buttons for Grading */}
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={fillDemoCustomer}
+                className="flex-1 cursor-pointer rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-medium text-zinc-300 transition hover:border-amber-400/40 hover:text-white"
+              >
+                Demo Customer (thirdy)
+              </button>
+              <button
+                type="button"
+                onClick={fillDemoAdmin}
+                className="flex-1 cursor-pointer rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-1.5 text-[11px] font-medium text-amber-300 transition hover:bg-amber-400/20"
+              >
+                Demo Admin (admin)
+              </button>
+            </div>
+
+            <form onSubmit={handleLoginSubmit} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Username
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <User className="h-4 w-4 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="Enter your username"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-medium text-zinc-300">
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => switchMode("forgot-verify")}
+                    className="cursor-pointer text-xs font-medium text-amber-300 hover:underline"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <Lock className="h-4 w-4 text-zinc-400" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="Enter your password"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-2 w-full cursor-pointer rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-amber-300 py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:brightness-110 disabled:opacity-50"
+              >
+                {isSubmitting ? "Signing In..." : "Sign In"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* MODE 2: REGISTER (Username + Email + Password) */}
+        {mode === "register" && (
+          <div>
+            <span className="font-sport text-xl tracking-wider uppercase italic">
+              CREATE <span className="text-amber-300">MEMBER ACCOUNT</span>
+            </span>
+            <p className="mt-1.5 text-xs text-zinc-400">
+              Register your username, email, and password to unlock basket
+              checkout and liked shoes.
+            </p>
+
+            <form onSubmit={handleRegisterSubmit} className="mt-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Username
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <User className="h-4 w-4 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="Choose a username"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Email Address
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <Mail className="h-4 w-4 text-zinc-400" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="you@example.com"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Password
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <Lock className="h-4 w-4 text-zinc-400" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="Create a password"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-2 w-full cursor-pointer rounded-full bg-white py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:bg-amber-300 disabled:opacity-50"
+              >
+                {isSubmitting ? "Creating Account..." : "Register Account"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* MODE 3A: FORGOT PASSWORD — Verify Registered Email */}
+        {mode === "forgot-verify" && (
+          <div>
+            <button
+              type="button"
+              onClick={() => switchMode("login")}
+              className="mb-4 inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-white"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back to Sign In</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-amber-400" />
+              <span className="font-sport text-xl tracking-wider uppercase italic">
+                FORGOT <span className="text-amber-300">PASSWORD</span>
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs text-zinc-400">
+              Enter your registered email address. Once verified, the Change
+              Password Dashboard will unlock.
+            </p>
+
+            <form onSubmit={handleVerifyEmailSubmit} className="mt-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Registered Email Address
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <Mail className="h-4 w-4 text-zinc-400" />
+                  <input
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="e.g. thirdy@solepurpose.ph"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full cursor-pointer rounded-full bg-amber-400 py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:bg-amber-300 disabled:opacity-50"
+              >
+                {isSubmitting
+                  ? "Verifying Email..."
+                  : "Verify Email & Open Dashboard"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* MODE 3B: CHANGE PASSWORD DASHBOARD (CRUD Update, only unlocked if email is correct) */}
+        {mode === "change-password-dashboard" && (
+          <div>
+            <button
+              type="button"
+              onClick={() => switchMode("forgot-verify")}
+              className="mb-3 inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-white"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Change Email</span>
+            </button>
+
+            <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-3.5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
+                <ShieldCheck className="h-4 w-4" />
+                <span>Email Verified — Change Password Dashboard</span>
+              </div>
+              <p className="mt-1 text-xs text-zinc-300">
+                Account: <strong className="text-white">@{verifiedUsername}</strong>{" "}
+                ({resetEmail})
+              </p>
+            </div>
+
+            <form
+              onSubmit={handleResetPasswordSubmit}
+              className="mt-5 space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  New Password
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <Lock className="h-4 w-4 text-amber-400" />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="Enter new password"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Confirm New Password
+                </label>
+                <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
+                  <Lock className="h-4 w-4 text-amber-400" />
+                  <input
+                    type="password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    required
+                    className="w-full bg-transparent text-sm text-white focus:outline-none"
+                    placeholder="Confirm new password"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full cursor-pointer rounded-full bg-gradient-to-r from-emerald-400 to-teal-300 py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:brightness-110 disabled:opacity-50"
+              >
+                {isSubmitting
+                  ? "Updating Password..."
+                  : "Update Forgotten Password (CRUD)"}
+              </button>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -9,6 +9,29 @@ export interface ShoeAngleSet {
 
 export type AngleKey = keyof ShoeAngleSet;
 
+export type ShoeCategory =
+  | "All Shoes"
+  | "Basketball Shoes"
+  | "Running Shoes"
+  | "Sandals & Slides"
+  | "Lifestyle";
+
+export const SHOE_CATEGORIES: {
+  id: ShoeCategory;
+  label: string;
+  drawerLabel: string;
+}[] = [
+  { id: "All Shoes", label: "All Shoes", drawerLabel: "All Shoes" },
+  { id: "Lifestyle", label: "Lifestyle", drawerLabel: "Lifestyle" },
+  { id: "Running Shoes", label: "Running", drawerLabel: "Running" },
+  { id: "Basketball Shoes", label: "Basketball", drawerLabel: "Basketball" },
+  {
+    id: "Sandals & Slides",
+    label: "Sandals & Slides",
+    drawerLabel: "Sandals & Slides",
+  },
+];
+
 export interface AngleOption {
   key: AngleKey;
   label: string;
@@ -40,8 +63,9 @@ export interface FeaturedShoe {
   badge: string;
   name: string;
   colorwayName: string;
-  category: string;
+  category: Exclude<ShoeCategory, "All Shoes">;
   price: number;
+  stock: number;
   heroWord: string;
   tagline: string;
   description: string;
@@ -93,6 +117,8 @@ export function buildShoeRoomGradientCss(rgb: [number, number, number]): string 
   return `linear-gradient(180deg, ${stops.join(", ")})`;
 }
 
+export const HERO_CAROUSEL_SHOES_COUNT = 3;
+
 export const FEATURED_SHOES: FeaturedShoe[] = [
   {
     id: "ja-4-heat-check-ep",
@@ -102,6 +128,7 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
     colorwayName: "Thermal Violet / University Gold / Obsidian",
     category: "Basketball Shoes",
     price: 7895,
+    stock: 14,
     heroWord: "LUXURIOUS",
     tagline: "Explosive first-step containment with thermal-mapped court traction.",
     description:
@@ -157,10 +184,11 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
     id: "caitlin-1-ep-gold",
     sku: "SLP-CC1-AU22",
     badge: "Promo Exclusion",
-    name: "Caitlin 1 EP",
+    name: "Caitlin 1 EP 'Amarillo'",
     colorwayName: "Amarillo Gold / Baltic Blue / Emerald Spark",
     category: "Basketball Shoes",
     price: 7995,
+    stock: 9,
     heroWord: "PRECISION",
     tagline: "Logo-range stability and ultra-light dimensional knit control.",
     description:
@@ -205,10 +233,11 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
     id: "caitlin-1-ep-royal",
     sku: "SLP-CC1-RY23",
     badge: "Promo Exclusion",
-    name: "Caitlin 1 EP",
+    name: "Caitlin 1 EP 'Hyper Royal'",
     colorwayName: "Hyper Royal / Metallic Silver / Sunset Pulse",
     category: "Basketball Shoes",
     price: 7995,
+    stock: 12,
     heroWord: "VELOCITY",
     tagline: "Deep-range court feel with multidirectional micro-herringbone bite.",
     description:
@@ -246,6 +275,121 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
         comment:
           "EP outsole holds up great on outdoor concrete courts and cushions hard landings.",
         date: "Nov 10, 2026",
+      },
+    ],
+  },
+  // Starter Running, Sandals & Slides, and Lifestyle items (ready for future Nike photo references)
+  {
+    id: "pegasus-zoom-runner",
+    sku: "SLP-RUN-PG41",
+    badge: "New Arrival",
+    name: "Air Zoom Velocity Runner",
+    colorwayName: "Cobalt Pulse / Volt / Pure Platinum",
+    category: "Running Shoes",
+    price: 6895,
+    stock: 16,
+    heroWord: "ENDURANCE",
+    tagline: "Dual Air Zoom units with ReactX foam energy return for daily road miles.",
+    description:
+      "Engineered for high-mileage road running and tempo training. Breathable engineered mesh pairs with a responsive ReactX midsole and waffle traction outsole. (Photo reference slot ready for your Running shoe assets).",
+    accentHex: "#38BDF8",
+    glowRgb: "56, 189, 248",
+    roomRgb: [12, 68, 110],
+    sizes: ["US 7", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
+    angles: {
+      lateral: "/shoes/nike3.avif",
+      outsole: "/shoes/nike3.2.avif",
+      medial: "/shoes/nike3.3.avif",
+      topDown: "/shoes/nike3.4.avif",
+      pairAngle: "/shoes/nike3.5.avif",
+      heel: "/shoes/nike3.6.avif",
+    },
+    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
+    reviews: [
+      {
+        id: "r5",
+        author: "Miguel V.",
+        location: "Manila",
+        rating: 5,
+        title: "Smooth transition for 10K road runs",
+        comment: "Cushioning stays bouncy even after long weekend runs at UP Diliman.",
+        date: "Nov 19, 2026",
+      },
+    ],
+  },
+  {
+    id: "calm-recovery-slide",
+    sku: "SLP-SLD-CM09",
+    badge: "Post-Game Essential",
+    name: "Calm Recovery Slide",
+    colorwayName: "Solar Gold / Soft Ochre",
+    category: "Sandals & Slides",
+    price: 2795,
+    stock: 22,
+    heroWord: "RECOVERY",
+    tagline: "Contoured single-piece foam footbed for post-game recovery and everyday comfort.",
+    description:
+      "Designed for post-run and post-court recovery. Water-friendly contoured foam cradles the arch while deep flex grooves provide natural traction. (Photo reference slot ready for your Sandals & Slides assets).",
+    accentHex: "#FACC15",
+    glowRgb: "250, 204, 21",
+    roomRgb: [105, 72, 16],
+    sizes: ["US 7", "US 8", "US 9", "US 10", "US 11", "US 12"],
+    angles: {
+      lateral: "/shoes/nike2.1.avif",
+      outsole: "/shoes/nike2.2.avif",
+      medial: "/shoes/nike2.3.avif",
+      topDown: "/shoes/nike2.4.avif",
+      pairAngle: "/shoes/nike2.5.avif",
+      heel: "/shoes/nike2.6.avif",
+    },
+    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
+    reviews: [
+      {
+        id: "r6",
+        author: "Jules C.",
+        location: "Pasig",
+        rating: 5,
+        title: "Best slide after 2 hours on the court",
+        comment: "Super plush foam underfoot and easy to clean.",
+        date: "Nov 12, 2026",
+      },
+    ],
+  },
+  {
+    id: "street-prism-low",
+    sku: "SLP-LFS-PR04",
+    badge: "Streetwear Pick",
+    name: "Prism Low Street Edition",
+    colorwayName: "Iridescent Violet / Amber Gold",
+    category: "Lifestyle",
+    price: 6495,
+    stock: 8,
+    heroWord: "CULTURE",
+    tagline: "Court-inspired low-top silhouette tuned for all-day streetwear styling.",
+    description:
+      "Blending heritage court lines with modern street textures. Features a padded low-cut collar, durable cupsole construction, and bold thermal gradient accents. (Photo reference slot ready for your Lifestyle shoe assets).",
+    accentHex: "#C084FC",
+    glowRgb: "192, 132, 252",
+    roomRgb: [72, 28, 108],
+    sizes: ["US 7", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
+    angles: {
+      lateral: "/shoes/nike1.1.avif",
+      outsole: "/shoes/nike1.2.avif",
+      medial: "/shoes/nike1.3.avif",
+      topDown: "/shoes/nike1.4.avif",
+      pairAngle: "/shoes/nike1.5.avif",
+      heel: "/shoes/nike1.6.avif",
+    },
+    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
+    reviews: [
+      {
+        id: "r7",
+        author: "Rina L.",
+        location: "Makati",
+        rating: 5,
+        title: "Clean everyday rotation pair",
+        comment: "Goes hard with cargos and wide-leg denim.",
+        date: "Nov 15, 2026",
       },
     ],
   },

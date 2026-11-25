@@ -13,7 +13,7 @@ interface BasketDrawerProps {
   items: BasketItem[];
   onClose: () => void;
   onRemoveItem: (shoeId: string, size: string) => void;
-  onClearBasket: () => void;
+  onProceedToCheckout: () => void;
 }
 
 export function BasketDrawer({
@@ -21,7 +21,7 @@ export function BasketDrawer({
   items,
   onClose,
   onRemoveItem,
-  onClearBasket,
+  onProceedToCheckout,
 }: BasketDrawerProps) {
   if (!isOpen) return null;
 
@@ -63,7 +63,8 @@ export function BasketDrawer({
                 Your basket is currently empty.
               </p>
               <p className="mt-1 text-xs text-zinc-500">
-                Hover and click any shoe in our 360° cylinder or Featured Court Releases to add a pair.
+                Sign in and add any shoe from Featured Court Releases or the
+                Product Detail page to checkout.
               </p>
             </div>
           ) : (
@@ -114,8 +115,8 @@ export function BasketDrawer({
             <button
               type="button"
               onClick={() => {
-                onClearBasket();
                 onClose();
+                onProceedToCheckout();
               }}
               className="mt-4 w-full cursor-pointer rounded-full bg-white py-3.5 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:bg-amber-300"
             >

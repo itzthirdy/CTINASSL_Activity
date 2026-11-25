@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import {
   buildShoeRoomGradientCss,
-  FEATURED_SHOES,
   formatPHP,
   SHOE_ANGLE_OPTIONS,
 } from "../data/shoeCatalog";
@@ -25,10 +24,13 @@ import {
 
 interface ProductDetailPageProps {
   shoe: FeaturedShoe;
+  allProducts: FeaturedShoe[];
+  isLiked: boolean;
   initialAngle?: AngleKey;
   onBackToShop: () => void;
   onSelectShoe: (shoe: FeaturedShoe, angle?: AngleKey) => void;
   onAddToBasket: (shoe: FeaturedShoe, size: string) => void;
+  onToggleLike: (shoe: FeaturedShoe) => void;
 }
 
 interface RecommendationCardProps {
@@ -176,10 +178,13 @@ function ColorwaySwatchTile({
 
 export function ProductDetailPage({
   shoe,
+  allProducts,
+  isLiked,
   initialAngle = "lateral",
   onBackToShop,
   onSelectShoe,
   onAddToBasket,
+  onToggleLike,
 }: ProductDetailPageProps) {
   const heroStageRef = useRef<HTMLDivElement | null>(null);
   const primaryImgRef = useRef<HTMLImageElement | null>(null);
@@ -193,14 +198,12 @@ export function ProductDetailPage({
   const [selectedSize, setSelectedSize] = useState<string>(
     () => shoe.sizes[3] ?? shoe.sizes[0] ?? "US 9"
   );
-  const [isFavourite, setIsFavourite] = useState(false);
   const [addedFeedback, setAddedFeedback] = useState(false);
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [openAccordion, setOpenAccordion] = useState<
     "delivery" | "reviews" | null
   >("delivery");
 
-  // Scroll to top when shoe changes and preload all 6 angles of the active shoe
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
     preloadShoeCutouts(Object.values(shoe.angles));
@@ -248,20 +251,12 @@ export function ProductDetailPage({
     setTimeout(() => setAddedFeedback(false), 1600);
   };
 
-  // Build "You Might Also Like" list: the other 2 featured shoes first, plus alternate featured colorway view
-  const otherShoes = FEATURED_SHOES.filter((s) => s.id !== shoe.id);
-  const youMightAlsoLike = [
-    ...otherShoes.map((s) => ({
-      shoe: s,
-      angle: "lateral" as AngleKey,
-      subtitle: s.colorwayName,
-    })),
-    ...otherShoes.map((s) => ({
-      shoe: s,
-      angle: "pairAngle" as AngleKey,
-      subtitle: `${s.category} · 3/4 Edition`,
-    })),
-  ];
+  const otherShoes = allProducts.filter((s) => s.id !== shoe.id);
+  const youMightAlsoLike = otherShoes.map((s) => ({
+    shoe: s,
+    angle: "lateral" as AngleKey,
+    subtitle: `${s.category} · ${s.colorwayName}`,
+  }));
 
   const scrollRecommendations = (dir: -1 | 1) => {
     if (!recommendRowRef.current) return;
@@ -281,7 +276,6 @@ export function ProductDetailPage({
         className="relative overflow-hidden pt-28 pb-16 text-white transition-[background-image] duration-700 md:pt-28 md:pb-20"
         style={{ backgroundImage: roomBackground }}
       >
-        {/* Subtle Dot Grid Layer matching Home Hero */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute top-0 right-0 left-0 h-80 opacity-60"
@@ -328,9 +322,8 @@ export function ProductDetailPage({
 
           {/* Main Nike-Inspired 2-Column Layout */}
           <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-12 lg:gap-12">
-            {/* LEFT COLUMN: Huge Multi-Angle Showcase (Images 7 & 8) */}
+            {/* LEFT COLUMN: Huge Multi-Angle Showcase */}
             <div className="flex flex-col-reverse gap-4 sm:flex-row lg:sticky lg:top-24 lg:col-span-7">
-              {/* Vertical 6-Angle Thumbnail Strip */}
               <div className="flex flex-row gap-2.5 overflow-x-auto pb-1 sm:flex-col sm:overflow-visible sm:pb-0">
                 {SHOE_ANGLE_OPTIONS.map((opt, idx) => (
                   <AngleThumbnailTile
@@ -344,12 +337,9 @@ export function ProductDetailPage({
                 ))}
               </div>
 
-              {/* Giant Active Angles Stage */}
               <div className="relative flex-1">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-                  {/* Primary Huge Angle Frame */}
                   <div className="relative flex min-h-[380px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black/25 p-6 backdrop-blur-sm sm:min-h-[490px] md:col-span-12">
-                    {/* Ambient Under-Shoe Glow */}
                     <div
                       className="pointer-events-none absolute bottom-12 h-28 w-3/4 rounded-full opacity-55 blur-3xl"
                       style={{
@@ -365,7 +355,6 @@ export function ProductDetailPage({
                       className="relative z-10 max-h-[370px] w-full max-w-[580px] object-contain drop-shadow-[0_26px_32px_rgba(0,0,0,0.65)] will-change-transform select-none sm:max-h-[420px]"
                     />
 
-                    {/* Bottom Controls Overlay: Pagination Dots + Prev/Next Arrows (matching Image 7) */}
                     <div className="mt-4 flex w-full items-center justify-between pt-2">
                       <div className="flex items-center gap-2">
                         {SHOE_ANGLE_OPTIONS.map((opt, idx) => (
@@ -408,13 +397,10 @@ export function ProductDetailPage({
                   </div>
                 </div>
 
-                {/* Companion Angle Quick Strip Preview directly below main stage */}
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() =>
-                      switchAngleIndex(activeAngleIdx + 1)
-                    }
+                    onClick={() => switchAngleIndex(activeAngleIdx + 1)}
                     className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/15 bg-black/25 p-3 text-left backdrop-blur-sm transition hover:border-white/40 hover:bg-black/35"
                   >
                     <img
@@ -436,10 +422,12 @@ export function ProductDetailPage({
                   <div className="flex items-center justify-between rounded-xl border border-white/15 bg-black/25 px-4 py-3 backdrop-blur-sm">
                     <div>
                       <p className="text-[11px] font-semibold tracking-wider text-white/60 uppercase">
-                        All Angles
+                        Inventory Status
                       </p>
-                      <p className="font-mono-tabular text-xs font-semibold text-white">
-                        0{activeAngleIdx + 1} / 0{SHOE_ANGLE_OPTIONS.length} Studio Views
+                      <p className="font-mono-tabular text-xs font-semibold text-amber-300">
+                        {shoe.stock > 0
+                          ? `${shoe.stock} Pairs in Stock`
+                          : "Currently Out of Stock"}
                       </p>
                     </div>
                     <span
@@ -451,7 +439,7 @@ export function ProductDetailPage({
               </div>
             </div>
 
-            {/* RIGHT COLUMN: Title, Price, Colorways, Sizes, Add to Bag & Details (Images 7 & 8) */}
+            {/* RIGHT COLUMN: Title, Price, Colorways, Sizes, Add to Basket & Details */}
             <div className="lg:col-span-5">
               <div className="rounded-3xl border border-white/15 bg-black/30 p-6 backdrop-blur-xl sm:p-8">
                 <div className="flex items-center justify-between gap-2">
@@ -468,20 +456,35 @@ export function ProductDetailPage({
                 </h1>
                 <p className="mt-1 text-base text-white/75">{shoe.category}</p>
 
-                <p className="font-mono-tabular mt-4 text-2xl font-bold text-white">
-                  {formatPHP(shoe.price)}
-                </p>
+                <div className="mt-4 flex items-baseline justify-between">
+                  <p className="font-mono-tabular text-2xl font-bold text-white">
+                    {formatPHP(shoe.price)}
+                  </p>
+                  <span
+                    className={`font-mono-tabular rounded-full px-3 py-1 text-xs font-semibold ${
+                      shoe.stock <= 0
+                        ? "bg-red-500/20 text-red-200"
+                        : shoe.stock <= 3
+                          ? "bg-amber-500/20 text-amber-200"
+                          : "bg-emerald-500/20 text-emerald-200"
+                    }`}
+                  >
+                    {shoe.stock <= 0
+                      ? "Out of Stock"
+                      : `${shoe.stock} stocks left`}
+                  </span>
+                </div>
 
-                {/* Colorway Switcher Thumbnails (matching Image 7) */}
+                {/* Colorway Switcher Thumbnails */}
                 <div className="mt-6">
                   <p className="mb-2.5 text-xs font-medium text-white/80">
-                    Select Colorway:{" "}
+                    Select Release:{" "}
                     <span className="font-semibold text-white">
                       {shoe.colorwayName}
                     </span>
                   </p>
                   <div className="flex flex-wrap gap-2.5">
-                    {FEATURED_SHOES.map((item) => (
+                    {allProducts.map((item) => (
                       <ColorwaySwatchTile
                         key={item.id}
                         shoe={item}
@@ -492,7 +495,7 @@ export function ProductDetailPage({
                   </div>
                 </div>
 
-                {/* Size Selector Header + Size Guide (matching Image 7) */}
+                {/* Size Selector Header + Size Guide */}
                 <div className="mt-7">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-white">
@@ -508,7 +511,6 @@ export function ProductDetailPage({
                     </button>
                   </div>
 
-                  {/* Size Grid */}
                   <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
                     {shoe.sizes.map((size) => {
                       const active = selectedSize === size;
@@ -530,18 +532,21 @@ export function ProductDetailPage({
                   </div>
                 </div>
 
-                {/* Primary CTAs: Add to Basket & Favourite (matching Image 7) */}
+                {/* Primary CTAs: Add to Basket & Favourite (Requires Signed-In User) */}
                 <div className="mt-7 space-y-3">
                   <button
                     type="button"
+                    disabled={shoe.stock <= 0}
                     onClick={handleAdd}
-                    className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-full py-4 text-sm font-bold tracking-wide transition ${
+                    className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-full py-4 text-sm font-bold tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${
                       addedFeedback
                         ? "bg-emerald-500 text-white"
                         : "bg-white text-[#111111] hover:bg-amber-300"
                     }`}
                   >
-                    {addedFeedback ? (
+                    {shoe.stock <= 0 ? (
+                      <span>Out of Stock</span>
+                    ) : addedFeedback ? (
                       <>
                         <Check className="h-4 w-4" />
                         <span>Added {selectedSize} to Basket</span>
@@ -553,23 +558,23 @@ export function ProductDetailPage({
 
                   <button
                     type="button"
-                    onClick={() => setIsFavourite((prev) => !prev)}
+                    onClick={() => onToggleLike(shoe)}
                     className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-full border py-3.5 text-sm font-semibold transition ${
-                      isFavourite
+                      isLiked
                         ? "border-rose-400 bg-rose-500/20 text-rose-200"
                         : "border-white/30 bg-transparent text-white hover:border-white"
                     }`}
                   >
-                    <span>{isFavourite ? "Favourited" : "Favourite"}</span>
+                    <span>{isLiked ? "Saved in Liked Shoes" : "Favourite"}</span>
                     <Heart
                       className={`h-4 w-4 ${
-                        isFavourite ? "fill-rose-400 text-rose-400" : ""
+                        isLiked ? "fill-rose-400 text-rose-400" : ""
                       }`}
                     />
                   </button>
                 </div>
 
-                {/* Product Description & Specs (matching Image 8) */}
+                {/* Product Description & Specs */}
                 <div className="mt-7 border-t border-white/15 pt-6">
                   <p className="text-justify text-sm leading-relaxed text-zinc-200">
                     {shoe.description}
@@ -586,12 +591,12 @@ export function ProductDetailPage({
                     </li>
                     <li className="flex items-start gap-2.5">
                       <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-white" />
-                      <span>Outsole: Engineered Performance (EP) Extra-Durable Rubber</span>
+                      <span>Category: {shoe.category}</span>
                     </li>
                   </ul>
                 </div>
 
-                {/* Expandable Accordions: Free Delivery & Returns + Reviews (matching Image 8) */}
+                {/* Expandable Accordions */}
                 <div className="mt-6 divide-y divide-white/15 border-t border-white/15">
                   <div>
                     <button
@@ -613,9 +618,8 @@ export function ProductDetailPage({
                     {openAccordion === "delivery" && (
                       <div className="pb-4 text-xs leading-relaxed text-zinc-300">
                         Free standard double-boxed delivery across Metro Manila
-                        on orders ₱4,500 and above. Provincial Luzon, Visayas,
-                        and Mindanao shipping calculated at checkout. Unworn
-                        pairs may be returned within 14 days in original box.
+                        on orders ₱4,500 and above. Supports Cash on Delivery
+                        (COD), E-Wallet QR (GCash/Maya), and Debit/Credit Card.
                       </div>
                     )}
                   </div>
@@ -675,7 +679,7 @@ export function ProductDetailPage({
         </div>
       </section>
 
-      {/* BOTTOM SECTION: "You Might Also Like" in Pure White matching Home Page (Image 9) */}
+      {/* BOTTOM SECTION: "You Might Also Like" in Pure White matching Home Page */}
       <section className="border-t border-zinc-200 bg-white py-16 text-[#111111]">
         <div className="mx-auto max-w-7xl px-6 md:px-10">
           <div className="mb-8 flex items-center justify-between">
@@ -738,7 +742,7 @@ export function ProductDetailPage({
               <X className="h-4 w-4" />
             </button>
             <h3 className="font-sport text-xl uppercase italic">
-              Basketball EP Size Chart
+              Sole Purpose Size Chart
             </h3>
             <p className="mt-1 text-xs text-zinc-500">
               Engineered Performance (EP) pairs feature a slightly roomier forefoot fit for Philippine courts.

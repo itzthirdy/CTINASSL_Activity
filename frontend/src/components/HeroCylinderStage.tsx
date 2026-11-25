@@ -5,6 +5,8 @@ import type { FeaturedShoe } from "../data/shoeCatalog";
 import { buildShoeCarouselTexture } from "../utils/useTransparentCutout";
 import type { ShoeCarouselTexture } from "../utils/useTransparentCutout";
 
+const HERO_SHOES = FEATURED_SHOES.slice(0, 3);
+
 interface HeroCylinderStageProps {
   onShopNowClick: () => void;
   onSelectShoeToBuy: (shoe: FeaturedShoe) => void;
@@ -185,7 +187,7 @@ export function HeroCylinderStage({
   const [activeSlideIdx, setActiveSlideIdx] = useState<number>(0);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
-  const slideCount = FEATURED_SHOES.length; // 3 shoes
+  const slideCount = HERO_SHOES.length; // 3 hero shoes
 
   const modSlide = (n: number): number =>
     ((Math.round(n) % slideCount) + slideCount) % slideCount;
@@ -205,8 +207,8 @@ export function HeroCylinderStage({
     const frac = pos - floorIdx;
     const s0 = ((floorIdx % slideCount) + slideCount) % slideCount;
     const s1 = (((floorIdx + 1) % slideCount) + slideCount) % slideCount;
-    const c0 = FEATURED_SHOES[s0].roomRgb;
-    const c1 = FEATURED_SHOES[s1].roomRgb;
+    const c0 = HERO_SHOES[s0].roomRgb;
+    const c1 = HERO_SHOES[s1].roomRgb;
 
     const baseR = c0[0] + (c1[0] - c0[0]) * frac;
     const baseG = c0[1] + (c1[1] - c0[1]) * frac;
@@ -511,7 +513,7 @@ export function HeroCylinderStage({
         startMoveTo(interruptedDest);
       } else {
         const activeShoe =
-          FEATURED_SHOES[modSlide(posRef.current)] ?? FEATURED_SHOES[0];
+          HERO_SHOES[modSlide(posRef.current)] ?? HERO_SHOES[0];
         onSelectShoeToBuy(activeShoe);
         scheduleAutoplay(2000);
       }
@@ -575,7 +577,7 @@ export function HeroCylinderStage({
 
     // Build all 3 high-res side-profile shoe textures in parallel
     Promise.all(
-      FEATURED_SHOES.map((shoe) =>
+      HERO_SHOES.map((shoe) =>
         buildShoeCarouselTexture(shoe.angles.lateral)
       )
     ).then((loadedTextures) => {
@@ -608,7 +610,7 @@ export function HeroCylinderStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currentShoe = FEATURED_SHOES[activeSlideIdx] ?? FEATURED_SHOES[0];
+  const currentShoe = HERO_SHOES[activeSlideIdx] ?? HERO_SHOES[0];
 
   return (
     <section
