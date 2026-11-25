@@ -1,5 +1,17 @@
+/*
+!/README.md
+!.gitignore
+!/backend/
+!/frontend/
+
+# Dependencies, environment files, build outputs & local uploads
 node_modules/
 .env
-.env.local
-.DS_Store
+.env.*
+!.env.example
 dist/
+dist-ssr/
+uploads/
+*.local
+*.log
+.DS_Store

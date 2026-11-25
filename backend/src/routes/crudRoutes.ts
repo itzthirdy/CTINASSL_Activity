@@ -517,7 +517,7 @@ router.put(
     }
 
     const updated = await UserModel.findByIdAndUpdate(me._id, updates, {
-      new: true,
+      returnDocument: "after",
     });
     if (!updated) {
       res.status(404).json({ message: "User not found." });
@@ -626,7 +626,7 @@ router.put(
     }
 
     const updated = await UserModel.findByIdAndUpdate(req.params.id, updates, {
-      new: true,
+      returnDocument: "after",
     });
     if (!updated) {
       res.status(404).json({ message: "User not found." });
@@ -876,7 +876,7 @@ router.put(
     const updated = await ProductModel.findOneAndUpdate(
       { id: req.params.id },
       updates,
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     );
     if (!updated) {
       res.status(404).json({ message: "Shoe not found." });
@@ -1087,7 +1087,7 @@ router.put(
     await BasketModel.findOneAndUpdate(
       { userId: user._id },
       { userId: user._id, items: resolvedItems },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     await recordAudit({
@@ -1229,7 +1229,7 @@ router.put(
     const updated = await OrderModel.findByIdAndUpdate(
       req.params.id,
       { status: req.body?.status },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     );
     if (!updated) {
       res.status(404).json({ message: "Order not found." });
