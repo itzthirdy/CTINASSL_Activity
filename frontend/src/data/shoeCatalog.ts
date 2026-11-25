@@ -1,13 +1,27 @@
 export interface ShoeAngleSet {
   lateral: string;
-  outsole: string;
-  medial: string;
-  topDown: string;
-  pairAngle: string;
-  heel: string;
+  outsole?: string;
+  medial?: string;
+  topDown?: string;
+  pairAngle?: string;
+  heel?: string;
 }
 
 export type AngleKey = keyof ShoeAngleSet;
+
+export type AnimationPresetType =
+  | "studio-float"
+  | "court-bounce"
+  | "velocity-sweep";
+
+export const ANIMATION_PRESET_OPTIONS: {
+  id: AnimationPresetType;
+  label: string;
+}[] = [
+  { id: "studio-float", label: "Studio Float (3D Lift)" },
+  { id: "court-bounce", label: "Court Bounce (Athletic Spring)" },
+  { id: "velocity-sweep", label: "Velocity Sweep (Kinetic Angle)" },
+];
 
 export type ShoeCategory =
   | "All Shoes"
@@ -49,6 +63,7 @@ export const SHOE_ANGLE_OPTIONS: AngleOption[] = [
 
 export interface ShoeReview {
   id: string;
+  userId?: string;
   author: string;
   location: string;
   rating: number;
@@ -73,10 +88,20 @@ export interface FeaturedShoe {
   glowRgb: string;
   /** Shared studio gradient base RGB matching the Home Hero carousel */
   roomRgb: [number, number, number];
+  featuredInHero?: boolean;
+  animationPreset?: AnimationPresetType;
+  cutoutSensitivity?: number;
   sizes: string[];
   angles: ShoeAngleSet;
-  turntableSequence: AngleKey[];
-  reviews: ShoeReview[];
+  turntableSequence?: AngleKey[];
+  reviews?: ShoeReview[];
+}
+
+export function getAvailableAngles(shoe: FeaturedShoe): AngleOption[] {
+  const available = SHOE_ANGLE_OPTIONS.filter((opt) =>
+    Boolean(shoe.angles?.[opt.key])
+  );
+  return available.length > 0 ? available : [SHOE_ANGLE_OPTIONS[0]];
 }
 
 // 12 vertical gradient stops shared across the Hero Carousel and Product Detail Page
@@ -96,7 +121,7 @@ export const ROOM_GRADIENT_STOPS: [number, number][] = [
 ];
 
 export function buildShoeRoomGradientCss(rgb: [number, number, number]): string {
-  const [baseR, baseG, baseB] = rgb;
+  const [baseR, baseG, baseB] = rgb?.length === 3 ? rgb : [52, 56, 72];
   const stops = ROOM_GRADIENT_STOPS.map(([row, amount]) => {
     let r: number;
     let g: number;
@@ -111,14 +136,15 @@ export function buildShoeRoomGradientCss(rgb: [number, number, number]): string 
       g = Math.round(baseG + (255 - baseG) * amount);
       b = Math.round(baseB + (255 - baseB) * amount);
     }
-    const pct = ((row / 810) * 100).toFixed(1);
-    return `rgb(${r}, ${g}, ${b}) ${pct}%`;
+    const px = Math.round((row / 810) * 1000) / 10;
+    return `rgb(${r}, ${g}, ${b}) ${px}%`;
   });
   return `linear-gradient(180deg, ${stops.join(", ")})`;
 }
 
-export const HERO_CAROUSEL_SHOES_COUNT = 3;
-
+/**
+ * Optional Starter Demo Shoes loaded ONLY when Admin clicks "Load Starter Demo Shoes".
+ */
 export const FEATURED_SHOES: FeaturedShoe[] = [
   {
     id: "ja-4-heat-check-ep",
@@ -136,18 +162,10 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
     accentHex: "#F59E0B",
     glowRgb: "168, 85, 247",
     roomRgb: [86, 35, 122],
-    sizes: [
-      "US 7",
-      "US 7.5",
-      "US 8",
-      "US 8.5",
-      "US 9",
-      "US 9.5",
-      "US 10",
-      "US 10.5",
-      "US 11",
-      "US 12",
-    ],
+    featuredInHero: true,
+    animationPreset: "court-bounce",
+    cutoutSensitivity: 50,
+    sizes: ["US 7", "US 7.5", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
     angles: {
       lateral: "/shoes/nike1.1.avif",
       outsole: "/shoes/nike1.2.avif",
@@ -156,10 +174,10 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
       pairAngle: "/shoes/nike1.5.avif",
       heel: "/shoes/nike1.6.avif",
     },
-    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
     reviews: [
       {
         id: "r1",
+        userId: "seed-1",
         author: "Marco D.",
         location: "Quezon City",
         rating: 5,
@@ -167,16 +185,6 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
         comment:
           "Played three full runs in Katipunan and barely had to wipe once. The thermal purple and gold pops crazy in person.",
         date: "Nov 14, 2026",
-      },
-      {
-        id: "r2",
-        author: "Paolo R.",
-        location: "Makati",
-        rating: 5,
-        title: "Snug lockdown, snappy forefoot bounce",
-        comment:
-          "True to size EP fit with solid lateral containment on hard eurosteps.",
-        date: "Nov 03, 2026",
       },
     ],
   },
@@ -192,21 +200,14 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
     heroWord: "PRECISION",
     tagline: "Logo-range stability and ultra-light dimensional knit control.",
     description:
-      "Designed for quick-trigger pull-ups and relentless full-court pace. The dimensional braided upper locks your foot over a dual-density Cushlon 3.0 and Zoom Air strobel platform.",
+      "Designed for quick-trigger pull-ups and relentless full-court pace over a dual-density Cushlon 3.0 and Zoom Air strobel platform.",
     accentHex: "#EAB308",
     glowRgb: "234, 179, 8",
     roomRgb: [120, 78, 18],
-    sizes: [
-      "US 6.5",
-      "US 7",
-      "US 7.5",
-      "US 8",
-      "US 8.5",
-      "US 9",
-      "US 9.5",
-      "US 10",
-      "US 11",
-    ],
+    featuredInHero: true,
+    animationPreset: "studio-float",
+    cutoutSensitivity: 50,
+    sizes: ["US 6.5", "US 7", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
     angles: {
       lateral: "/shoes/nike2.1.avif",
       outsole: "/shoes/nike2.2.avif",
@@ -215,10 +216,10 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
       pairAngle: "/shoes/nike2.5.avif",
       heel: "/shoes/nike2.6.avif",
     },
-    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
     reviews: [
       {
         id: "r3",
+        userId: "seed-2",
         author: "Bea S.",
         location: "BGC, Taguig",
         rating: 5,
@@ -241,21 +242,14 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
     heroWord: "VELOCITY",
     tagline: "Deep-range court feel with multidirectional micro-herringbone bite.",
     description:
-      "Finished in electric Hyper Royal dimensional weave with a sunset-tinted heel crash pad. Tuned for sharp off-ball cuts, rapid deceleration, and all-game midfoot breathability.",
+      "Finished in electric Hyper Royal dimensional weave with a sunset-tinted heel crash pad for rapid deceleration.",
     accentHex: "#3B82F6",
     glowRgb: "59, 130, 246",
     roomRgb: [5, 56, 120],
-    sizes: [
-      "US 6.5",
-      "US 7",
-      "US 7.5",
-      "US 8",
-      "US 8.5",
-      "US 9",
-      "US 9.5",
-      "US 10",
-      "US 11",
-    ],
+    featuredInHero: true,
+    animationPreset: "velocity-sweep",
+    cutoutSensitivity: 50,
+    sizes: ["US 7", "US 7.5", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
     angles: {
       lateral: "/shoes/nike3.avif",
       outsole: "/shoes/nike3.2.avif",
@@ -264,134 +258,7 @@ export const FEATURED_SHOES: FeaturedShoe[] = [
       pairAngle: "/shoes/nike3.5.avif",
       heel: "/shoes/nike3.6.avif",
     },
-    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
-    reviews: [
-      {
-        id: "r4",
-        author: "Kenji T.",
-        location: "Cebu City",
-        rating: 5,
-        title: "Hyper Royal colorway turns heads immediately",
-        comment:
-          "EP outsole holds up great on outdoor concrete courts and cushions hard landings.",
-        date: "Nov 10, 2026",
-      },
-    ],
-  },
-  // Starter Running, Sandals & Slides, and Lifestyle items (ready for future Nike photo references)
-  {
-    id: "pegasus-zoom-runner",
-    sku: "SLP-RUN-PG41",
-    badge: "New Arrival",
-    name: "Air Zoom Velocity Runner",
-    colorwayName: "Cobalt Pulse / Volt / Pure Platinum",
-    category: "Running Shoes",
-    price: 6895,
-    stock: 16,
-    heroWord: "ENDURANCE",
-    tagline: "Dual Air Zoom units with ReactX foam energy return for daily road miles.",
-    description:
-      "Engineered for high-mileage road running and tempo training. Breathable engineered mesh pairs with a responsive ReactX midsole and waffle traction outsole. (Photo reference slot ready for your Running shoe assets).",
-    accentHex: "#38BDF8",
-    glowRgb: "56, 189, 248",
-    roomRgb: [12, 68, 110],
-    sizes: ["US 7", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
-    angles: {
-      lateral: "/shoes/nike3.avif",
-      outsole: "/shoes/nike3.2.avif",
-      medial: "/shoes/nike3.3.avif",
-      topDown: "/shoes/nike3.4.avif",
-      pairAngle: "/shoes/nike3.5.avif",
-      heel: "/shoes/nike3.6.avif",
-    },
-    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
-    reviews: [
-      {
-        id: "r5",
-        author: "Miguel V.",
-        location: "Manila",
-        rating: 5,
-        title: "Smooth transition for 10K road runs",
-        comment: "Cushioning stays bouncy even after long weekend runs at UP Diliman.",
-        date: "Nov 19, 2026",
-      },
-    ],
-  },
-  {
-    id: "calm-recovery-slide",
-    sku: "SLP-SLD-CM09",
-    badge: "Post-Game Essential",
-    name: "Calm Recovery Slide",
-    colorwayName: "Solar Gold / Soft Ochre",
-    category: "Sandals & Slides",
-    price: 2795,
-    stock: 22,
-    heroWord: "RECOVERY",
-    tagline: "Contoured single-piece foam footbed for post-game recovery and everyday comfort.",
-    description:
-      "Designed for post-run and post-court recovery. Water-friendly contoured foam cradles the arch while deep flex grooves provide natural traction. (Photo reference slot ready for your Sandals & Slides assets).",
-    accentHex: "#FACC15",
-    glowRgb: "250, 204, 21",
-    roomRgb: [105, 72, 16],
-    sizes: ["US 7", "US 8", "US 9", "US 10", "US 11", "US 12"],
-    angles: {
-      lateral: "/shoes/nike2.1.avif",
-      outsole: "/shoes/nike2.2.avif",
-      medial: "/shoes/nike2.3.avif",
-      topDown: "/shoes/nike2.4.avif",
-      pairAngle: "/shoes/nike2.5.avif",
-      heel: "/shoes/nike2.6.avif",
-    },
-    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
-    reviews: [
-      {
-        id: "r6",
-        author: "Jules C.",
-        location: "Pasig",
-        rating: 5,
-        title: "Best slide after 2 hours on the court",
-        comment: "Super plush foam underfoot and easy to clean.",
-        date: "Nov 12, 2026",
-      },
-    ],
-  },
-  {
-    id: "street-prism-low",
-    sku: "SLP-LFS-PR04",
-    badge: "Streetwear Pick",
-    name: "Prism Low Street Edition",
-    colorwayName: "Iridescent Violet / Amber Gold",
-    category: "Lifestyle",
-    price: 6495,
-    stock: 8,
-    heroWord: "CULTURE",
-    tagline: "Court-inspired low-top silhouette tuned for all-day streetwear styling.",
-    description:
-      "Blending heritage court lines with modern street textures. Features a padded low-cut collar, durable cupsole construction, and bold thermal gradient accents. (Photo reference slot ready for your Lifestyle shoe assets).",
-    accentHex: "#C084FC",
-    glowRgb: "192, 132, 252",
-    roomRgb: [72, 28, 108],
-    sizes: ["US 7", "US 8", "US 8.5", "US 9", "US 9.5", "US 10", "US 11"],
-    angles: {
-      lateral: "/shoes/nike1.1.avif",
-      outsole: "/shoes/nike1.2.avif",
-      medial: "/shoes/nike1.3.avif",
-      topDown: "/shoes/nike1.4.avif",
-      pairAngle: "/shoes/nike1.5.avif",
-      heel: "/shoes/nike1.6.avif",
-    },
-    turntableSequence: ["lateral", "pairAngle", "medial", "heel", "topDown", "outsole"],
-    reviews: [
-      {
-        id: "r7",
-        author: "Rina L.",
-        location: "Makati",
-        rating: 5,
-        title: "Clean everyday rotation pair",
-        comment: "Goes hard with cargos and wide-leg denim.",
-        date: "Nov 15, 2026",
-      },
-    ],
+    reviews: [],
   },
 ];
 

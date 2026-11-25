@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { animate } from "animejs";
+import type { FormEvent } from "react";
 import {
   ArrowLeft,
   Check,
@@ -7,16 +7,26 @@ import {
   ChevronLeft,
   ChevronRight,
   Heart,
+  Pause,
+  Play,
   Ruler,
   Star,
+  Trash2,
   X,
 } from "lucide-react";
 import {
+  apply3DPerspectiveTilt,
+  playShoeHoverLift,
+  playShoePresetAnimation,
+  reset3DPerspectiveTilt,
+} from "../animations/shoeAnimations";
+import {
   buildShoeRoomGradientCss,
   formatPHP,
-  SHOE_ANGLE_OPTIONS,
+  getAvailableAngles,
 } from "../data/shoeCatalog";
 import type { AngleKey, FeaturedShoe } from "../data/shoeCatalog";
+import type { AppUser } from "../services/api";
 import {
   preloadShoeCutouts,
   useShoeCutoutUrl,
@@ -25,73 +35,70 @@ import {
 interface ProductDetailPageProps {
   shoe: FeaturedShoe;
   allProducts: FeaturedShoe[];
+  currentUser: AppUser | null;
   isLiked: boolean;
   initialAngle?: AngleKey;
   onBackToShop: () => void;
   onSelectShoe: (shoe: FeaturedShoe, angle?: AngleKey) => void;
   onAddToBasket: (shoe: FeaturedShoe, size: string) => void;
   onToggleLike: (shoe: FeaturedShoe) => void;
-}
-
-interface RecommendationCardProps {
-  shoe: FeaturedShoe;
-  previewAngle?: AngleKey;
-  subtitleOverride?: string;
-  onClick: () => void;
+  onAddReview: (
+    shoeId: string,
+    review: { rating: number; title: string; comment: string; location: string }
+  ) => Promise<void>;
+  onDeleteReview: (shoeId: string, reviewId: string) => Promise<void>;
 }
 
 function RecommendationCard({
   shoe,
-  previewAngle = "lateral",
-  subtitleOverride,
   onClick,
-}: RecommendationCardProps) {
-  const [hovered, setHovered] = useState(false);
+}: {
+  shoe: FeaturedShoe;
+  onClick: () => void;
+}) {
+  const cardBoxRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const currentAngle: AngleKey = hovered ? "pairAngle" : previewAngle;
-  const cutoutSrc = useShoeCutoutUrl(shoe.angles[currentAngle]);
-
-  const handleEnter = () => {
-    setHovered(true);
-    if (imgRef.current) {
-      animate(imgRef.current, {
-        translateY: [8, -8],
-        rotate: [0, -4],
-        scale: [0.96, 1.06],
-        duration: 460,
-        ease: "outBack(1.6)",
-      });
-    }
-  };
-
-  const handleLeave = () => {
-    setHovered(false);
-    if (imgRef.current) {
-      animate(imgRef.current, {
-        translateY: 0,
-        rotate: 0,
-        scale: 1,
-        duration: 380,
-        ease: "outExpo",
-      });
-    }
-  };
+  const sheenRef = useRef<HTMLDivElement | null>(null);
+  const cutoutSrc = useShoeCutoutUrl(
+    shoe.angles.lateral,
+    shoe.cutoutSensitivity ?? 50
+  );
 
   return (
     <button
       type="button"
       onClick={onClick}
-      onMouseEnter={handleEnter}
-      onMouseLeave={handleLeave}
+      onMouseEnter={() =>
+        playShoeHoverLift(imgRef.current, shoe.animationPreset ?? "studio-float")
+      }
+      onMouseLeave={() =>
+        reset3DPerspectiveTilt(cardBoxRef.current, imgRef.current, sheenRef.current)
+      }
       className="group flex w-full shrink-0 cursor-pointer flex-col text-left focus:outline-none"
     >
-      <div className="flex aspect-[1/1] w-full items-center justify-center overflow-hidden bg-[#F5F5F5] p-5 transition-shadow duration-300 group-hover:shadow-[0_16px_40px_rgba(0,0,0,0.1)]">
+      <div
+        ref={cardBoxRef}
+        onPointerMove={(e) =>
+          apply3DPerspectiveTilt(
+            cardBoxRef.current,
+            imgRef.current,
+            sheenRef.current,
+            e
+          )
+        }
+        className="relative flex aspect-[1/1] w-full items-center justify-center overflow-hidden rounded-lg bg-[#F5F5F5] p-5 transition-shadow duration-300 group-hover:shadow-[0_16px_40px_rgba(0,0,0,0.1)]"
+      >
+        <div
+          ref={sheenRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity duration-300"
+        />
         <img
           ref={imgRef}
           src={cutoutSrc}
           alt={shoe.name}
           draggable={false}
-          className="max-h-full max-w-full scale-[1.06] object-contain drop-shadow-[0_16px_20px_rgba(0,0,0,0.16)] will-change-transform select-none"
+          className="relative z-10 max-h-full max-w-full scale-[1.06] object-contain drop-shadow-[0_16px_20px_rgba(0,0,0,0.16)] will-change-transform select-none"
         />
       </div>
       <div className="pt-3.5">
@@ -99,7 +106,7 @@ function RecommendationCard({
           {shoe.name}
         </p>
         <p className="text-sm text-[#707072]">
-          {subtitleOverride ?? shoe.colorwayName}
+          {shoe.category} · {shoe.colorwayName}
         </p>
         <p className="font-mono-tabular mt-1.5 text-[15px] font-semibold text-[#111111]">
           {formatPHP(shoe.price)}
@@ -122,7 +129,10 @@ function AngleThumbnailTile({
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const thumbSrc = useShoeCutoutUrl(shoe.angles[angleKey]);
+  const thumbSrc = useShoeCutoutUrl(
+    shoe.angles[angleKey] ?? "",
+    shoe.cutoutSensitivity ?? 50
+  );
   return (
     <button
       type="button"
@@ -155,7 +165,10 @@ function ColorwaySwatchTile({
   isActive: boolean;
   onClick: () => void;
 }) {
-  const thumbSrc = useShoeCutoutUrl(shoe.angles.lateral);
+  const thumbSrc = useShoeCutoutUrl(
+    shoe.angles.lateral,
+    shoe.cutoutSensitivity ?? 50
+  );
   return (
     <button
       type="button"
@@ -179,24 +192,30 @@ function ColorwaySwatchTile({
 export function ProductDetailPage({
   shoe,
   allProducts,
+  currentUser,
   isLiked,
   initialAngle = "lateral",
   onBackToShop,
   onSelectShoe,
   onAddToBasket,
   onToggleLike,
+  onAddReview,
+  onDeleteReview,
 }: ProductDetailPageProps) {
-  const heroStageRef = useRef<HTMLDivElement | null>(null);
+  const stageCardRef = useRef<HTMLDivElement | null>(null);
   const primaryImgRef = useRef<HTMLImageElement | null>(null);
-  const secondaryImgRef = useRef<HTMLImageElement | null>(null);
+  const sheenRef = useRef<HTMLDivElement | null>(null);
   const recommendRowRef = useRef<HTMLDivElement | null>(null);
 
+  const availableAngles = getAvailableAngles(shoe);
+
   const [activeAngleIdx, setActiveAngleIdx] = useState<number>(() => {
-    const idx = SHOE_ANGLE_OPTIONS.findIndex((o) => o.key === initialAngle);
+    const idx = availableAngles.findIndex((o) => o.key === initialAngle);
     return idx >= 0 ? idx : 0;
   });
+  const [isTurntablePlaying, setIsTurntablePlaying] = useState(false);
   const [selectedSize, setSelectedSize] = useState<string>(
-    () => shoe.sizes[3] ?? shoe.sizes[0] ?? "US 9"
+    () => shoe.sizes[2] ?? shoe.sizes[0] ?? "US 9"
   );
   const [addedFeedback, setAddedFeedback] = useState(false);
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
@@ -204,45 +223,68 @@ export function ProductDetailPage({
     "delivery" | "reviews" | null
   >("delivery");
 
+  // Review Form State
+  const [revRating, setRevRating] = useState(5);
+  const [revTitle, setRevTitle] = useState("");
+  const [revLocation, setRevLocation] = useState("Metro Manila");
+  const [revComment, setRevComment] = useState("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
-    preloadShoeCutouts(Object.values(shoe.angles));
-  }, [shoe]);
+    const urls = availableAngles
+      .map((a) => shoe.angles[a.key])
+      .filter((u): u is string => Boolean(u));
+    preloadShoeCutouts(urls, shoe.cutoutSensitivity ?? 50);
+  }, [shoe, availableAngles]);
+
+  // Trigger shoe entrance preset when arriving at Product Detail
+  useEffect(() => {
+    playShoePresetAnimation(
+      primaryImgRef.current,
+      shoe.animationPreset ?? "studio-float"
+    );
+  }, [shoe.id, shoe.animationPreset]);
+
+  // Optional 360° Turntable auto-angle rotation
+  useEffect(() => {
+    if (!isTurntablePlaying || availableAngles.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setActiveAngleIdx((prev) => (prev + 1) % availableAngles.length);
+      playShoePresetAnimation(
+        primaryImgRef.current,
+        shoe.animationPreset ?? "studio-float"
+      );
+    }, 1450);
+    return () => window.clearInterval(timer);
+  }, [isTurntablePlaying, availableAngles.length, shoe.animationPreset]);
 
   const primaryAngleOption =
-    SHOE_ANGLE_OPTIONS[activeAngleIdx] ?? SHOE_ANGLE_OPTIONS[0];
+    availableAngles[activeAngleIdx % availableAngles.length] ??
+    availableAngles[0];
   const secondaryAngleOption =
-    SHOE_ANGLE_OPTIONS[(activeAngleIdx + 1) % SHOE_ANGLE_OPTIONS.length];
+    availableAngles[(activeAngleIdx + 1) % availableAngles.length] ??
+    availableAngles[0];
 
   const primaryCutoutSrc = useShoeCutoutUrl(
-    shoe.angles[primaryAngleOption.key]
+    shoe.angles[primaryAngleOption.key] ?? shoe.angles.lateral,
+    shoe.cutoutSensitivity ?? 50
   );
   const secondaryCutoutSrc = useShoeCutoutUrl(
-    shoe.angles[secondaryAngleOption.key]
+    shoe.angles[secondaryAngleOption.key] ?? shoe.angles.lateral,
+    shoe.cutoutSensitivity ?? 50
   );
 
   const switchAngleIndex = (nextIdx: number) => {
+    setIsTurntablePlaying(false);
     const wrapped =
-      ((nextIdx % SHOE_ANGLE_OPTIONS.length) + SHOE_ANGLE_OPTIONS.length) %
-      SHOE_ANGLE_OPTIONS.length;
+      ((nextIdx % availableAngles.length) + availableAngles.length) %
+      availableAngles.length;
     setActiveAngleIdx(wrapped);
-
-    if (primaryImgRef.current) {
-      animate(primaryImgRef.current, {
-        scale: [0.92, 1.02, 1],
-        opacity: [0.6, 1],
-        duration: 420,
-        ease: "outExpo",
-      });
-    }
-    if (secondaryImgRef.current) {
-      animate(secondaryImgRef.current, {
-        scale: [0.94, 1],
-        opacity: [0.6, 1],
-        duration: 420,
-        ease: "outExpo",
-      });
-    }
+    playShoePresetAnimation(
+      primaryImgRef.current,
+      shoe.animationPreset ?? "studio-float"
+    );
   };
 
   const handleAdd = () => {
@@ -251,28 +293,37 @@ export function ProductDetailPage({
     setTimeout(() => setAddedFeedback(false), 1600);
   };
 
+  const handleReviewSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!revTitle.trim() || !revComment.trim()) return;
+    setIsSubmittingReview(true);
+    try {
+      await onAddReview(shoe.id, {
+        rating: revRating,
+        title: revTitle.trim(),
+        comment: revComment.trim(),
+        location: revLocation.trim() || "Philippines",
+      });
+      setRevTitle("");
+      setRevComment("");
+      setRevRating(5);
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
+  const reviews = shoe.reviews ?? [];
   const otherShoes = allProducts.filter((s) => s.id !== shoe.id);
-  const youMightAlsoLike = otherShoes.map((s) => ({
-    shoe: s,
-    angle: "lateral" as AngleKey,
-    subtitle: `${s.category} · ${s.colorwayName}`,
-  }));
 
   const scrollRecommendations = (dir: -1 | 1) => {
-    if (!recommendRowRef.current) return;
-    recommendRowRef.current.scrollBy({
-      left: dir * 420,
-      behavior: "smooth",
-    });
+    recommendRowRef.current?.scrollBy({ left: dir * 420, behavior: "smooth" });
   };
 
   const roomBackground = buildShoeRoomGradientCss(shoe.roomRgb);
 
   return (
     <div className="min-h-screen w-full">
-      {/* TOP PRODUCT STAGE: Uses the exact per-shoe colorway gradient palette from the Home Page */}
       <section
-        ref={heroStageRef}
         className="relative overflow-hidden pt-28 pb-16 text-white transition-[background-image] duration-700 md:pt-28 md:pb-20"
         style={{ backgroundImage: roomBackground }}
       >
@@ -283,15 +334,13 @@ export function ProductDetailPage({
             backgroundImage:
               "radial-gradient(circle, rgba(255,255,255,0.22) 0px, rgba(255,255,255,0.22) 1.1px, transparent 1.7px)",
             backgroundSize: "42px 38px",
-            maskImage:
-              "linear-gradient(to bottom, black 25%, transparent 100%)",
+            maskImage: "linear-gradient(to bottom, black 25%, transparent 100%)",
             WebkitMaskImage:
               "linear-gradient(to bottom, black 25%, transparent 100%)",
           }}
         />
 
         <div className="relative z-10 mx-auto max-w-7xl px-6 md:px-10">
-          {/* Breadcrumb & Back to Shop */}
           <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
             <button
               type="button"
@@ -320,12 +369,11 @@ export function ProductDetailPage({
             </nav>
           </div>
 
-          {/* Main Nike-Inspired 2-Column Layout */}
           <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-12 lg:gap-12">
-            {/* LEFT COLUMN: Huge Multi-Angle Showcase */}
+            {/* LEFT COLUMN: All Uploaded Angles + 3D Tilt + 360° Turntable */}
             <div className="flex flex-col-reverse gap-4 sm:flex-row lg:sticky lg:top-24 lg:col-span-7">
               <div className="flex flex-row gap-2.5 overflow-x-auto pb-1 sm:flex-col sm:overflow-visible sm:pb-0">
-                {SHOE_ANGLE_OPTIONS.map((opt, idx) => (
+                {availableAngles.map((opt, idx) => (
                   <AngleThumbnailTile
                     key={opt.key}
                     shoe={shoe}
@@ -338,43 +386,88 @@ export function ProductDetailPage({
               </div>
 
               <div className="relative flex-1">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-                  <div className="relative flex min-h-[380px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black/25 p-6 backdrop-blur-sm sm:min-h-[490px] md:col-span-12">
-                    <div
-                      className="pointer-events-none absolute bottom-12 h-28 w-3/4 rounded-full opacity-55 blur-3xl"
-                      style={{
-                        background: `radial-gradient(ellipse, rgba(${shoe.glowRgb}, 0.7) 0%, transparent 72%)`,
-                      }}
-                    />
+                <div
+                  ref={stageCardRef}
+                  onPointerMove={(e) =>
+                    apply3DPerspectiveTilt(
+                      stageCardRef.current,
+                      primaryImgRef.current,
+                      sheenRef.current,
+                      e
+                    )
+                  }
+                  onPointerLeave={() =>
+                    reset3DPerspectiveTilt(
+                      stageCardRef.current,
+                      primaryImgRef.current,
+                      sheenRef.current
+                    )
+                  }
+                  className="relative flex min-h-[380px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-black/25 p-6 backdrop-blur-sm transition-transform duration-200 ease-out sm:min-h-[490px]"
+                  style={{ transformStyle: "preserve-3d" }}
+                >
+                  <div
+                    ref={sheenRef}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity duration-300"
+                  />
 
-                    <img
-                      ref={primaryImgRef}
-                      src={primaryCutoutSrc}
-                      alt={`${shoe.name} — ${primaryAngleOption.label}`}
-                      draggable={false}
-                      className="relative z-10 max-h-[370px] w-full max-w-[580px] object-contain drop-shadow-[0_26px_32px_rgba(0,0,0,0.65)] will-change-transform select-none sm:max-h-[420px]"
-                    />
+                  <div
+                    className="pointer-events-none absolute bottom-12 h-28 w-3/4 rounded-full opacity-55 blur-3xl"
+                    style={{
+                      background: `radial-gradient(ellipse, rgba(${shoe.glowRgb}, 0.7) 0%, transparent 72%)`,
+                    }}
+                  />
 
-                    <div className="mt-4 flex w-full items-center justify-between pt-2">
-                      <div className="flex items-center gap-2">
-                        {SHOE_ANGLE_OPTIONS.map((opt, idx) => (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() => switchAngleIndex(idx)}
-                            aria-label={`View ${opt.label}`}
-                            className={`h-1.5 cursor-pointer rounded-full transition-all ${
-                              activeAngleIdx === idx
-                                ? "w-6 bg-white"
-                                : "w-1.5 bg-white/40 hover:bg-white/75"
-                            }`}
-                          />
-                        ))}
-                        <span className="ml-2 text-xs font-medium text-white/80">
-                          {primaryAngleOption.label}
-                        </span>
-                      </div>
+                  {availableAngles.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsTurntablePlaying((v) => !v)}
+                      className="absolute top-4 right-4 z-20 inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-white/25 bg-black/45 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur-md transition hover:border-white hover:bg-white hover:text-black"
+                    >
+                      {isTurntablePlaying ? (
+                        <>
+                          <Pause className="h-3.5 w-3.5" />
+                          <span>Pause 360°</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3.5 w-3.5" />
+                          <span>360° Turntable</span>
+                        </>
+                      )}
+                    </button>
+                  )}
 
+                  <img
+                    ref={primaryImgRef}
+                    src={primaryCutoutSrc}
+                    alt={`${shoe.name} — ${primaryAngleOption.label}`}
+                    draggable={false}
+                    className="relative z-10 max-h-[370px] w-full max-w-[580px] object-contain drop-shadow-[0_26px_32px_rgba(0,0,0,0.65)] will-change-transform select-none sm:max-h-[420px]"
+                  />
+
+                  <div className="relative z-20 mt-4 flex w-full items-center justify-between pt-2">
+                    <div className="flex items-center gap-2">
+                      {availableAngles.map((opt, idx) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => switchAngleIndex(idx)}
+                          aria-label={`View ${opt.label}`}
+                          className={`h-1.5 cursor-pointer rounded-full transition-all ${
+                            activeAngleIdx === idx
+                              ? "w-6 bg-white"
+                              : "w-1.5 bg-white/40 hover:bg-white/75"
+                          }`}
+                        />
+                      ))}
+                      <span className="ml-2 text-xs font-medium text-white/80">
+                        {primaryAngleOption.label}
+                      </span>
+                    </div>
+
+                    {availableAngles.length > 1 && (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -393,7 +486,7 @@ export function ProductDetailPage({
                           <ChevronRight className="h-5 w-5" />
                         </button>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
@@ -404,7 +497,6 @@ export function ProductDetailPage({
                     className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/15 bg-black/25 p-3 text-left backdrop-blur-sm transition hover:border-white/40 hover:bg-black/35"
                   >
                     <img
-                      ref={secondaryImgRef}
                       src={secondaryCutoutSrc}
                       alt={secondaryAngleOption.label}
                       className="h-14 w-20 object-contain"
@@ -439,7 +531,7 @@ export function ProductDetailPage({
               </div>
             </div>
 
-            {/* RIGHT COLUMN: Title, Price, Colorways, Sizes, Add to Basket & Details */}
+            {/* RIGHT COLUMN: Specs, Sizes, CTAs & Reviews CRUD */}
             <div className="lg:col-span-5">
               <div className="rounded-3xl border border-white/15 bg-black/30 p-6 backdrop-blur-xl sm:p-8">
                 <div className="flex items-center justify-between gap-2">
@@ -475,27 +567,29 @@ export function ProductDetailPage({
                   </span>
                 </div>
 
-                {/* Colorway Switcher Thumbnails */}
-                <div className="mt-6">
-                  <p className="mb-2.5 text-xs font-medium text-white/80">
-                    Select Release:{" "}
-                    <span className="font-semibold text-white">
-                      {shoe.colorwayName}
-                    </span>
-                  </p>
-                  <div className="flex flex-wrap gap-2.5">
-                    {allProducts.map((item) => (
-                      <ColorwaySwatchTile
-                        key={item.id}
-                        shoe={item}
-                        isActive={item.id === shoe.id}
-                        onClick={() => onSelectShoe(item, primaryAngleOption.key)}
-                      />
-                    ))}
+                {allProducts.length > 1 && (
+                  <div className="mt-6">
+                    <p className="mb-2.5 text-xs font-medium text-white/80">
+                      Select Release:{" "}
+                      <span className="font-semibold text-white">
+                        {shoe.colorwayName}
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2.5">
+                      {allProducts.map((item) => (
+                        <ColorwaySwatchTile
+                          key={item.id}
+                          shoe={item}
+                          isActive={item.id === shoe.id}
+                          onClick={() =>
+                            onSelectShoe(item, primaryAngleOption.key)
+                          }
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Size Selector Header + Size Guide */}
                 <div className="mt-7">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-white">
@@ -532,7 +626,6 @@ export function ProductDetailPage({
                   </div>
                 </div>
 
-                {/* Primary CTAs: Add to Basket & Favourite (Requires Signed-In User) */}
                 <div className="mt-7 space-y-3">
                   <button
                     type="button"
@@ -574,12 +667,10 @@ export function ProductDetailPage({
                   </button>
                 </div>
 
-                {/* Product Description & Specs */}
                 <div className="mt-7 border-t border-white/15 pt-6">
                   <p className="text-justify text-sm leading-relaxed text-zinc-200">
                     {shoe.description}
                   </p>
-
                   <ul className="mt-5 space-y-2 text-sm text-zinc-200">
                     <li className="flex items-start gap-2.5">
                       <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-white" />
@@ -596,7 +687,7 @@ export function ProductDetailPage({
                   </ul>
                 </div>
 
-                {/* Expandable Accordions */}
+                {/* Accordions: Delivery & Customer Reviews CRUD */}
                 <div className="mt-6 divide-y divide-white/15 border-t border-white/15">
                   <div>
                     <button
@@ -634,7 +725,7 @@ export function ProductDetailPage({
                       }
                       className="flex w-full cursor-pointer items-center justify-between py-4 text-left text-base font-medium text-white"
                     >
-                      <span>Reviews ({shoe.reviews.length})</span>
+                      <span>Reviews ({reviews.length})</span>
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-0.5 text-amber-300">
                           {Array.from({ length: 5 }).map((_, i) => (
@@ -648,27 +739,129 @@ export function ProductDetailPage({
                         />
                       </div>
                     </button>
+
                     {openAccordion === "reviews" && (
-                      <div className="space-y-3 pb-4">
-                        {shoe.reviews.map((rev) => (
-                          <div
-                            key={rev.id}
-                            className="rounded-xl border border-white/10 bg-white/[0.05] p-3.5"
+                      <div className="space-y-4 pb-4">
+                        {reviews.length === 0 ? (
+                          <p className="text-xs text-zinc-400">
+                            No verified buyer reviews yet. Be the first to review!
+                          </p>
+                        ) : (
+                          reviews.map((rev) => {
+                            const canDelete =
+                              currentUser &&
+                              (currentUser.role === "admin" ||
+                                rev.userId === currentUser._id);
+                            return (
+                              <div
+                                key={rev.id}
+                                className="rounded-xl border border-white/10 bg-white/[0.05] p-3.5"
+                              >
+                                <div className="flex items-center justify-between gap-2 text-xs">
+                                  <span className="font-semibold text-white">
+                                    {rev.title}
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-white/50">
+                                      {rev.date}
+                                    </span>
+                                    {canDelete && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          void onDeleteReview(shoe.id, rev.id)
+                                        }
+                                        title="Delete review"
+                                        className="cursor-pointer text-zinc-400 hover:text-red-400"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="mt-1 flex items-center gap-0.5 text-amber-300">
+                                  {Array.from({ length: rev.rating }).map(
+                                    (_, idx) => (
+                                      <Star
+                                        key={idx}
+                                        className="h-3 w-3 fill-current"
+                                      />
+                                    )
+                                  )}
+                                </div>
+                                <p className="mt-1.5 text-xs leading-relaxed text-zinc-300">
+                                  {rev.comment}
+                                </p>
+                                <p className="mt-2 text-[11px] text-amber-300">
+                                  {rev.author} · {rev.location}
+                                </p>
+                              </div>
+                            );
+                          })
+                        )}
+
+                        {currentUser && (
+                          <form
+                            onSubmit={handleReviewSubmit}
+                            className="space-y-2.5 rounded-xl border border-white/15 bg-black/35 p-3.5 text-xs"
                           >
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-semibold text-white">
-                                {rev.title}
-                              </span>
-                              <span className="text-white/50">{rev.date}</span>
+                            <p className="font-semibold text-white">
+                              Write a Review
+                            </p>
+                            <div className="flex items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  type="button"
+                                  onClick={() => setRevRating(star)}
+                                  className="cursor-pointer p-0.5 text-amber-300"
+                                >
+                                  <Star
+                                    className={`h-4 w-4 ${
+                                      star <= revRating
+                                        ? "fill-amber-300"
+                                        : "text-zinc-500"
+                                    }`}
+                                  />
+                                </button>
+                              ))}
                             </div>
-                            <p className="mt-1.5 text-xs leading-relaxed text-zinc-300">
-                              {rev.comment}
-                            </p>
-                            <p className="mt-2 text-[11px] text-amber-300">
-                              {rev.author} · {rev.location}
-                            </p>
-                          </div>
-                        ))}
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                required
+                                value={revTitle}
+                                onChange={(e) => setRevTitle(e.target.value)}
+                                placeholder="Headline"
+                                className="rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-white focus:outline-none"
+                              />
+                              <input
+                                type="text"
+                                value={revLocation}
+                                onChange={(e) => setRevLocation(e.target.value)}
+                                placeholder="City (e.g. QC)"
+                                className="rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-white focus:outline-none"
+                              />
+                            </div>
+                            <textarea
+                              rows={2}
+                              required
+                              value={revComment}
+                              onChange={(e) => setRevComment(e.target.value)}
+                              placeholder="How is the fit, traction, and cushion?"
+                              className="w-full rounded-lg border border-white/15 bg-black/50 px-2.5 py-1.5 text-white focus:outline-none"
+                            />
+                            <button
+                              type="submit"
+                              disabled={isSubmittingReview}
+                              className="w-full cursor-pointer rounded-full bg-amber-400 py-2 font-bold text-black uppercase hover:bg-amber-300 disabled:opacity-50"
+                            >
+                              {isSubmittingReview
+                                ? "Submitting..."
+                                : "Post Review"}
+                            </button>
+                          </form>
+                        )}
                       </div>
                     )}
                   </div>
@@ -679,52 +872,50 @@ export function ProductDetailPage({
         </div>
       </section>
 
-      {/* BOTTOM SECTION: "You Might Also Like" in Pure White matching Home Page */}
-      <section className="border-t border-zinc-200 bg-white py-16 text-[#111111]">
-        <div className="mx-auto max-w-7xl px-6 md:px-10">
-          <div className="mb-8 flex items-center justify-between">
-            <h2 className="text-2xl font-medium tracking-tight text-[#111111] sm:text-3xl">
-              You Might Also Like
-            </h2>
+      {otherShoes.length > 0 && (
+        <section className="border-t border-zinc-200 bg-white py-16 text-[#111111]">
+          <div className="mx-auto max-w-7xl px-6 md:px-10">
+            <div className="mb-8 flex items-center justify-between">
+              <h2 className="text-2xl font-medium tracking-tight text-[#111111] sm:text-3xl">
+                You Might Also Like
+              </h2>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => scrollRecommendations(-1)}
-                aria-label="Scroll recommendations left"
-                className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-[#F5F5F5] text-[#111111] transition hover:bg-zinc-200"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => scrollRecommendations(1)}
-                aria-label="Scroll recommendations right"
-                className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-[#F5F5F5] text-[#111111] transition hover:bg-zinc-200"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => scrollRecommendations(-1)}
+                  aria-label="Scroll recommendations left"
+                  className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-[#F5F5F5] text-[#111111] transition hover:bg-zinc-200"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollRecommendations(1)}
+                  aria-label="Scroll recommendations right"
+                  className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-[#F5F5F5] text-[#111111] transition hover:bg-zinc-200"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={recommendRowRef}
+              className="grid grid-flow-col auto-cols-[80%] gap-4 overflow-x-auto pb-4 sm:auto-cols-[46%] md:auto-cols-[32%]"
+            >
+              {otherShoes.map((rec) => (
+                <RecommendationCard
+                  key={rec.id}
+                  shoe={rec}
+                  onClick={() => onSelectShoe(rec, "lateral")}
+                />
+              ))}
             </div>
           </div>
+        </section>
+      )}
 
-          <div
-            ref={recommendRowRef}
-            className="grid grid-flow-col auto-cols-[80%] gap-4 overflow-x-auto pb-4 sm:auto-cols-[46%] md:auto-cols-[32%]"
-          >
-            {youMightAlsoLike.map((rec, idx) => (
-              <RecommendationCard
-                key={`${rec.shoe.id}-${rec.angle}-${idx}`}
-                shoe={rec.shoe}
-                previewAngle={rec.angle}
-                subtitleOverride={rec.subtitle}
-                onClick={() => onSelectShoe(rec.shoe, rec.angle)}
-              />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Size Guide Modal */}
       {isSizeGuideOpen && (
         <div
           onClick={() => setIsSizeGuideOpen(false)}
@@ -745,7 +936,8 @@ export function ProductDetailPage({
               Sole Purpose Size Chart
             </h3>
             <p className="mt-1 text-xs text-zinc-500">
-              Engineered Performance (EP) pairs feature a slightly roomier forefoot fit for Philippine courts.
+              Engineered Performance (EP) pairs feature a slightly roomier
+              forefoot fit for Philippine courts.
             </p>
             <div className="mt-5 overflow-hidden rounded-xl border border-zinc-200">
               <table className="font-mono-tabular w-full text-left text-xs">

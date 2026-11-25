@@ -38,14 +38,15 @@ export function AuthModal({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<AuthModalMode>(initialMode);
 
-  // Form states
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Forgot Password -> Change Password Dashboard states
+  // 3-Step OTP Forgot Password states
   const [resetEmail, setResetEmail] = useState("");
   const [verifiedUsername, setVerifiedUsername] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [devOtpPreview, setDevOtpPreview] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
@@ -81,7 +82,6 @@ export function AuthModal({
     }
   };
 
-  // 1. LOGIN (Username + Password ONLY — Email hidden for security)
   const handleLoginSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -97,12 +97,11 @@ export function AuthModal({
     }
   };
 
-  // 2. REGISTER (CRUD Create: Username + Email + Password)
   const handleRegisterSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    if (password.length < 4) {
-      setErrorMsg("Password must be at least 4 characters.");
+    if (password.length < 6) {
+      setErrorMsg("Password must be at least 6 characters.");
       return;
     }
     setIsSubmitting(true);
@@ -117,7 +116,6 @@ export function AuthModal({
     }
   };
 
-  // 3A. FORGOT PASSWORD STEP 1: Verify Email Exists
   const handleVerifyEmailSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -125,6 +123,8 @@ export function AuthModal({
     try {
       const res = await storeApi.verifyEmailForReset(resetEmail);
       setVerifiedUsername(res.username);
+      setDevOtpPreview(res.devOtpPreview ?? null);
+      setOtpCode("");
       setNewPassword("");
       setConfirmNewPassword("");
       switchMode("change-password-dashboard");
@@ -139,12 +139,15 @@ export function AuthModal({
     }
   };
 
-  // 3B. FORGOT PASSWORD STEP 2: Change Password Dashboard (CRUD Update)
   const handleResetPasswordSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    if (newPassword.length < 4) {
-      setErrorMsg("New password must be at least 4 characters.");
+    if (otpCode.trim().length !== 6) {
+      setErrorMsg("Enter the 6-digit OTP verification code.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setErrorMsg("New password must be at least 6 characters.");
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -155,12 +158,13 @@ export function AuthModal({
     try {
       const updatedUser = await storeApi.resetPasswordByEmail(
         resetEmail,
+        otpCode,
         newPassword
       );
       setUsername(updatedUser.username);
       setPassword(newPassword);
       setSuccessMsg(
-        `Password updated via CRUD for @${updatedUser.username}! You can now sign in.`
+        `Password reset for @${updatedUser.username}! You can now sign in.`
       );
       setTimeout(() => {
         setMode("login");
@@ -204,14 +208,12 @@ export function AuthModal({
           <X className="h-4 w-4" />
         </button>
 
-        {/* Optional Prompt Message when Guest clicks Add to Basket or Favourite */}
         {promptMessage && (
           <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-xs font-medium text-amber-200">
             {promptMessage}
           </div>
         )}
 
-        {/* Top Mode Tabs for Login / Register */}
         {(mode === "login" || mode === "register") && (
           <div className="mb-5 grid grid-cols-2 gap-2 rounded-2xl bg-black/50 p-1">
             <button
@@ -239,7 +241,6 @@ export function AuthModal({
           </div>
         )}
 
-        {/* Error & Success Alerts */}
         {errorMsg && (
           <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/15 px-3.5 py-2.5 text-xs font-medium text-red-200">
             {errorMsg}
@@ -253,7 +254,6 @@ export function AuthModal({
           </div>
         )}
 
-        {/* MODE 1: LOGIN (Username + Password ONLY — no Email field) */}
         {mode === "login" && (
           <div>
             <span className="font-sport text-xl tracking-wider uppercase italic">
@@ -264,7 +264,6 @@ export function AuthModal({
               liked shoes, and checkout.
             </p>
 
-            {/* Quick Demo Fill Buttons for Grading */}
             <div className="mt-4 flex items-center gap-2">
               <button
                 type="button"
@@ -337,15 +336,13 @@ export function AuthModal({
           </div>
         )}
 
-        {/* MODE 2: REGISTER (Username + Email + Password) */}
         {mode === "register" && (
           <div>
             <span className="font-sport text-xl tracking-wider uppercase italic">
               CREATE <span className="text-amber-300">MEMBER ACCOUNT</span>
             </span>
             <p className="mt-1.5 text-xs text-zinc-400">
-              Register your username, email, and password to unlock basket
-              checkout and liked shoes.
+              Register your username, email, and password (min 6 characters).
             </p>
 
             <form onSubmit={handleRegisterSubmit} className="mt-5 space-y-4">
@@ -360,6 +357,7 @@ export function AuthModal({
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     required
+                    minLength={3}
                     className="w-full bg-transparent text-sm text-white focus:outline-none"
                     placeholder="Choose a username"
                   />
@@ -394,8 +392,9 @@ export function AuthModal({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    minLength={6}
                     className="w-full bg-transparent text-sm text-white focus:outline-none"
-                    placeholder="Create a password"
+                    placeholder="Minimum 6 characters"
                   />
                 </div>
               </div>
@@ -411,7 +410,6 @@ export function AuthModal({
           </div>
         )}
 
-        {/* MODE 3A: FORGOT PASSWORD — Verify Registered Email */}
         {mode === "forgot-verify" && (
           <div>
             <button
@@ -430,8 +428,7 @@ export function AuthModal({
               </span>
             </div>
             <p className="mt-1.5 text-xs text-zinc-400">
-              Enter your registered email address. Once verified, the Change
-              Password Dashboard will unlock.
+              Enter your registered email to generate a 6-digit verification OTP.
             </p>
 
             <form onSubmit={handleVerifyEmailSubmit} className="mt-5 space-y-4">
@@ -457,15 +454,12 @@ export function AuthModal({
                 disabled={isSubmitting}
                 className="w-full cursor-pointer rounded-full bg-amber-400 py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:bg-amber-300 disabled:opacity-50"
               >
-                {isSubmitting
-                  ? "Verifying Email..."
-                  : "Verify Email & Open Dashboard"}
+                {isSubmitting ? "Sending OTP..." : "Send 6-Digit OTP"}
               </button>
             </form>
           </div>
         )}
 
-        {/* MODE 3B: CHANGE PASSWORD DASHBOARD (CRUD Update, only unlocked if email is correct) */}
         {mode === "change-password-dashboard" && (
           <div>
             <button
@@ -480,18 +474,36 @@ export function AuthModal({
             <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-3.5">
               <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
                 <ShieldCheck className="h-4 w-4" />
-                <span>Email Verified — Change Password Dashboard</span>
+                <span>OTP Verification Active · @{verifiedUsername}</span>
               </div>
-              <p className="mt-1 text-xs text-zinc-300">
-                Account: <strong className="text-white">@{verifiedUsername}</strong>{" "}
-                ({resetEmail})
-              </p>
+              {devOtpPreview && (
+                <p className="font-mono-tabular mt-1.5 text-xs text-amber-300">
+                  Demo OTP Code: <strong>{devOtpPreview}</strong>
+                </p>
+              )}
             </div>
 
             <form
               onSubmit={handleResetPasswordSubmit}
-              className="mt-5 space-y-4"
+              className="mt-4 space-y-3.5"
             >
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  6-Digit OTP Code
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  value={otpCode}
+                  onChange={(e) =>
+                    setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="000000"
+                  className="font-mono-tabular mt-1.5 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5 text-center text-base font-bold tracking-[0.35em] text-white focus:border-amber-400 focus:outline-none"
+                />
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-zinc-300">
                   New Password
@@ -503,8 +515,9 @@ export function AuthModal({
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
+                    minLength={6}
                     className="w-full bg-transparent text-sm text-white focus:outline-none"
-                    placeholder="Enter new password"
+                    placeholder="Minimum 6 characters"
                   />
                 </div>
               </div>
@@ -520,6 +533,7 @@ export function AuthModal({
                     value={confirmNewPassword}
                     onChange={(e) => setConfirmNewPassword(e.target.value)}
                     required
+                    minLength={6}
                     className="w-full bg-transparent text-sm text-white focus:outline-none"
                     placeholder="Confirm new password"
                   />
@@ -531,9 +545,7 @@ export function AuthModal({
                 disabled={isSubmitting}
                 className="w-full cursor-pointer rounded-full bg-gradient-to-r from-emerald-400 to-teal-300 py-3 text-xs font-bold tracking-[0.18em] text-black uppercase transition hover:brightness-110 disabled:opacity-50"
               >
-                {isSubmitting
-                  ? "Updating Password..."
-                  : "Update Forgotten Password (CRUD)"}
+                {isSubmitting ? "Resetting..." : "Verify OTP & Save Password"}
               </button>
             </form>
           </div>

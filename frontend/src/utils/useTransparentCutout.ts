@@ -7,6 +7,32 @@ export interface ShoeCarouselTexture {
   blurredCanvas: HTMLCanvasElement;
 }
 
+export interface ExtractedShoePalette {
+  roomRgb: [number, number, number];
+  accentHex: string;
+  glowRgb: string;
+}
+
+const API_ROOT = (
+  import.meta.env.VITE_API_URL ?? "http://localhost:8000/api"
+).replace(/\/api\/?$/, "");
+
+export function resolveAssetUrl(src: string): string {
+  if (!src) return "";
+  if (
+    src.startsWith("http://") ||
+    src.startsWith("https://") ||
+    src.startsWith("data:") ||
+    src.startsWith("blob:")
+  ) {
+    return src;
+  }
+  if (src.startsWith("/uploads/")) {
+    return `${API_ROOT}${src}`;
+  }
+  return src;
+}
+
 const textureCache = new Map<string, ShoeCarouselTexture>();
 const inflightCache = new Map<string, Promise<ShoeCarouselTexture>>();
 
@@ -14,12 +40,13 @@ const tightCutoutCache = new Map<string, string>();
 const tightCutoutInflight = new Map<string, Promise<string>>();
 
 /**
- * Isolates the shoe from its neutral studio background (#F5F5F5 -> #888888) via
- * 4-border BFS flood-fill and un-premultiplies anti-aliased boundary pixels so
- * zero dark/shady edge rim and zero white halo remain.
+ * Isolates the shoe from white/neutral studio backgrounds (#FFFFFF / #F5F5F5 -> #888888)
+ * via 4-border BFS flood-fill with tunable `sensitivity` (0..100) and un-premultiplies
+ * anti-aliased boundary pixels so zero white halo remains.
  */
-function segmentAndUnpremultiplyShoe(
-  img: HTMLImageElement
+export function segmentAndUnpremultiplyShoe(
+  img: HTMLImageElement,
+  sensitivity = 50
 ): {
   canvas: HTMLCanvasElement;
   minX: number;
@@ -29,6 +56,7 @@ function segmentAndUnpremultiplyShoe(
 } | null {
   const w = img.naturalWidth || img.width;
   const h = img.naturalHeight || img.height;
+  if (!w || !h) return null;
 
   const rawCanvas = document.createElement("canvas");
   rawCanvas.width = w;
@@ -41,12 +69,19 @@ function segmentAndUnpremultiplyShoe(
   const data = imageData.data;
   const total = w * h;
 
-  const bgR = data[0] || 245;
-  const bgG = data[1] || 245;
-  const bgB = data[2] || 245;
+  // Sample average border background pixel (top-left corner)
+  const bgR = data[0] ?? 255;
+  const bgG = data[1] ?? 255;
+  const bgB = data[2] ?? 255;
+
+  const s = Math.max(0, Math.min(100, sensitivity)) / 100;
+  const maxChroma = 10 + s * 18; // 10..28
+  const minLuma = 215 - s * 115; // 215..100
+  const maxDistFromBorder = 24 + s * 52; // 24..76
 
   const isStudioBackdrop = (idx: number): boolean => {
     const i = idx * 4;
+    if (data[i + 3] < 20) return true;
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
@@ -54,8 +89,16 @@ function segmentAndUnpremultiplyShoe(
     const minC = Math.min(r, g, b);
     const chroma = maxC - minC;
 
-    if (chroma <= 18 && maxC >= 122) return true;
-    if (chroma <= 11 && maxC >= 78 && maxC < 122) return true;
+    if (chroma <= maxChroma && maxC >= minLuma) return true;
+
+    const dr = r - bgR;
+    const dg = g - bgG;
+    const db = b - bgB;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    if (dist <= maxDistFromBorder && chroma <= maxChroma + 6 && maxC >= 165) {
+      return true;
+    }
+
     return false;
   };
 
@@ -174,24 +217,170 @@ function segmentAndUnpremultiplyShoe(
   return { canvas: rawCanvas, minX, minY, maxX, maxY };
 }
 
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+/**
+ * Extracts a harmonious studio backdrop RGB (`roomRgb`), bright accent hex (`accentHex`),
+ * and glow RGB from the isolated shoe pixels (ignoring removed studio background).
+ */
+export function extractShoeColorPalette(
+  src: string,
+  sensitivity = 50
+): Promise<ExtractedShoePalette> {
+  const resolved = resolveAssetUrl(src);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const seg = segmentAndUnpremultiplyShoe(img, sensitivity);
+      if (!seg) {
+        resolve({
+          roomRgb: [52, 56, 72],
+          accentHex: "#F59E0B",
+          glowRgb: "245, 158, 11",
+        });
+        return;
+      }
+
+      const ctx = seg.canvas.getContext("2d");
+      if (!ctx) {
+        resolve({
+          roomRgb: [52, 56, 72],
+          accentHex: "#F59E0B",
+          glowRgb: "245, 158, 11",
+        });
+        return;
+      }
+
+      const { width, height } = seg.canvas;
+      const data = ctx.getImageData(0, 0, width, height).data;
+
+      // Quantize into 12 hue buckets + fallback monochrome accumulator
+      const buckets = Array.from({ length: 12 }, () => ({
+        weight: 0,
+        r: 0,
+        g: 0,
+        b: 0,
+      }));
+      let totalWeight = 0;
+
+      const stride = Math.max(1, Math.floor((width * height) / 14000));
+      for (let idx = 0; idx < width * height; idx += stride) {
+        const i = idx * 4;
+        if (data[i + 3] < 200) continue;
+
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const delta = maxC - minC;
+        const sat = maxC === 0 ? 0 : delta / maxC;
+        const lum = (r + g + b) / 3;
+
+        // Skip near-white rubber midsoles and pitch-black sole shadows
+        if (lum > 235 || lum < 18 || sat < 0.16) continue;
+
+        let hue = 0;
+        if (delta > 0) {
+          if (maxC === r) hue = ((g - b) / delta) % 6;
+          else if (maxC === g) hue = (b - r) / delta + 2;
+          else hue = (r - g) / delta + 4;
+          hue = ((hue * 60) + 360) % 360;
+        }
+
+        const bucketIdx = Math.min(11, Math.floor(hue / 30));
+        const w = sat * sat * (1 - Math.abs(lum - 128) / 160);
+        if (w <= 0) continue;
+
+        buckets[bucketIdx].weight += w;
+        buckets[bucketIdx].r += r * w;
+        buckets[bucketIdx].g += g * w;
+        buckets[bucketIdx].b += b * w;
+        totalWeight += w;
+      }
+
+      if (totalWeight <= 0.01) {
+        // Monochrome / triple-white / triple-black shoe -> sleek dark obsidian-steel studio
+        resolve({
+          roomRgb: [46, 52, 68],
+          accentHex: "#E4E4E7",
+          glowRgb: "148, 163, 184",
+        });
+        return;
+      }
+
+      buckets.sort((a, b) => b.weight - a.weight);
+      const primary = buckets[0];
+      const avgR = primary.r / primary.weight;
+      const avgG = primary.g / primary.weight;
+      const avgB = primary.b / primary.weight;
+
+      // Scale dominant color into dramatic studio room range (peak ~ 118)
+      const peak = Math.max(avgR, avgG, avgB, 1);
+      const roomScale = Math.min(1.1, 118 / peak);
+      const roomRgb: [number, number, number] = [
+        Math.max(14, Math.min(140, Math.round(avgR * roomScale))),
+        Math.max(14, Math.min(140, Math.round(avgG * roomScale))),
+        Math.max(14, Math.min(140, Math.round(avgB * roomScale))),
+      ];
+
+      // Secondary accent (or vibrant primary) for highlight pills & glow
+      const secondary =
+        buckets[1] && buckets[1].weight > primary.weight * 0.18
+          ? buckets[1]
+          : primary;
+      const accR = Math.min(255, Math.round((secondary.r / secondary.weight) * 1.15));
+      const accG = Math.min(255, Math.round((secondary.g / secondary.weight) * 1.15));
+      const accB = Math.min(255, Math.round((secondary.b / secondary.weight) * 1.15));
+
+      resolve({
+        roomRgb,
+        accentHex: rgbToHex(accR, accG, accB),
+        glowRgb: `${accR}, ${accG}, ${accB}`,
+      });
+    };
+    img.onerror = () =>
+      resolve({
+        roomRgb: [52, 56, 72],
+        accentHex: "#F59E0B",
+        glowRgb: "245, 158, 11",
+      });
+    img.src = resolved;
+  });
+}
+
 /**
  * Builds a tightly cropped, zero-halo transparent PNG cutout so shoes fill store cards
- * and Product Detail views at huge scale without inner gray box seams.
+ * and Product Detail views cleanly on any background.
  */
-export function buildTightShoeCutout(src: string): Promise<string> {
-  const cached = tightCutoutCache.get(src);
+export function buildTightShoeCutout(
+  src: string,
+  sensitivity = 50
+): Promise<string> {
+  const resolved = resolveAssetUrl(src);
+  if (!resolved) return Promise.resolve("");
+
+  const cacheKey = `${resolved}::${sensitivity}`;
+  const cached = tightCutoutCache.get(cacheKey);
   if (cached) return Promise.resolve(cached);
 
-  const existing = tightCutoutInflight.get(src);
+  const existing = tightCutoutInflight.get(cacheKey);
   if (existing) return existing;
 
   const promise = new Promise<string>((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
-      const seg = segmentAndUnpremultiplyShoe(img);
+      const seg = segmentAndUnpremultiplyShoe(img, sensitivity);
       if (!seg || seg.maxX <= seg.minX || seg.maxY <= seg.minY) {
-        resolve(src);
+        resolve(resolved);
         return;
       }
 
@@ -203,7 +392,7 @@ export function buildTightShoeCutout(src: string): Promise<string> {
       outCanvas.height = cropH;
       const outCtx = outCanvas.getContext("2d");
       if (!outCtx) {
-        resolve(src);
+        resolve(resolved);
         return;
       }
 
@@ -220,51 +409,59 @@ export function buildTightShoeCutout(src: string): Promise<string> {
       );
 
       const dataUrl = outCanvas.toDataURL("image/png");
-      tightCutoutCache.set(src, dataUrl);
+      tightCutoutCache.set(cacheKey, dataUrl);
       resolve(dataUrl);
     };
-    img.onerror = () => resolve(src);
-    img.src = src;
+    img.onerror = () => resolve(resolved);
+    img.src = resolved;
   });
 
-  tightCutoutInflight.set(src, promise);
+  tightCutoutInflight.set(cacheKey, promise);
   return promise;
 }
 
-export function useShoeCutoutUrl(src: string): string {
-  const [url, setUrl] = useState<string>(() => tightCutoutCache.get(src) ?? src);
+export function useShoeCutoutUrl(src: string, sensitivity = 50): string {
+  const resolved = resolveAssetUrl(src);
+  const cacheKey = `${resolved}::${sensitivity}`;
+  const [url, setUrl] = useState<string>(
+    () => tightCutoutCache.get(cacheKey) ?? resolved
+  );
 
   useEffect(() => {
     let active = true;
-    buildTightShoeCutout(src).then((res) => {
+    if (!resolved) return;
+    buildTightShoeCutout(resolved, sensitivity).then((res) => {
       if (active) setUrl(res);
     });
     return () => {
       active = false;
     };
-  }, [src]);
+  }, [resolved, sensitivity]);
 
-  return url;
+  return resolved ? url : "";
 }
 
-export function preloadShoeCutouts(urls: string[]): void {
+export function preloadShoeCutouts(urls: string[], sensitivity = 50): void {
   for (const url of urls) {
-    void buildTightShoeCutout(url);
+    if (url) {
+      void buildTightShoeCutout(url, sensitivity);
+    }
   }
 }
 
 /**
- * HalvenMotos Section 11 style texture builder for the Home Hero Carousel:
- * Composes onto a 2048 x 1024 canvas with the 4-part elliptical ground shadow at y = 956
- * and shared scaling horizon at y = 490.5.
+ * Composes a 2048 x 1024 hero carousel texture with 4-part elliptical ground shadow at y = 956.
  */
 export function buildShoeCarouselTexture(
-  src: string
+  src: string,
+  sensitivity = 50
 ): Promise<ShoeCarouselTexture> {
-  const cached = textureCache.get(src);
+  const resolved = resolveAssetUrl(src);
+  const cacheKey = `${resolved}::${sensitivity}`;
+  const cached = textureCache.get(cacheKey);
   if (cached) return Promise.resolve(cached);
 
-  const existing = inflightCache.get(src);
+  const existing = inflightCache.get(cacheKey);
   if (existing) return existing;
 
   const promise = new Promise<ShoeCarouselTexture>((resolve) => {
@@ -282,7 +479,7 @@ export function buildShoeCarouselTexture(
       blurredCanvas.height = 512;
       const blurredCtx = blurredCanvas.getContext("2d");
 
-      const seg = segmentAndUnpremultiplyShoe(img);
+      const seg = segmentAndUnpremultiplyShoe(img, sensitivity);
       if (!seg || !sharpCtx || !blurredCtx) {
         resolve({ sharpCanvas, blurredCanvas });
         return;
@@ -351,7 +548,7 @@ export function buildShoeCarouselTexture(
       blurredCtx.filter = "none";
 
       const result: ShoeCarouselTexture = { sharpCanvas, blurredCanvas };
-      textureCache.set(src, result);
+      textureCache.set(cacheKey, result);
       resolve(result);
     };
 
@@ -361,9 +558,9 @@ export function buildShoeCarouselTexture(
       resolve({ sharpCanvas, blurredCanvas });
     };
 
-    img.src = src;
+    img.src = resolved;
   });
 
-  inflightCache.set(src, promise);
+  inflightCache.set(cacheKey, promise);
   return promise;
 }

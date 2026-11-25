@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   Route,
@@ -22,7 +22,9 @@ import { LikedShoesDrawer } from "./components/LikedShoesDrawer";
 import { UserAccountPage } from "./components/UserAccountPage";
 import { PaymentDashboardPage } from "./components/PaymentDashboardPage";
 import { AdminDashboardPage } from "./components/AdminDashboardPage";
-import { FEATURED_SHOES, SHOE_CATEGORIES } from "./data/shoeCatalog";
+import { ToastContainer } from "./components/ToastContainer";
+import type { ToastNotice } from "./components/ToastContainer";
+import { SHOE_CATEGORIES } from "./data/shoeCatalog";
 import type { AngleKey, FeaturedShoe, ShoeCategory } from "./data/shoeCatalog";
 import { storeApi } from "./services/api";
 import type {
@@ -33,43 +35,80 @@ import type {
   ShippingAddressRecord,
 } from "./services/api";
 
+function getBasketKey(userId: string | undefined): string {
+  return `sp_basket_v1_${userId ?? "guest"}`;
+}
+
+function loadPersistedBasket(userId: string | undefined): BasketItem[] {
+  try {
+    const raw = localStorage.getItem(getBasketKey(userId));
+    return raw ? (JSON.parse(raw) as BasketItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function ProductDetailRoute({
   products,
+  currentUser,
   likedShoeIds,
   onBackToShop,
   onSelectShoe,
   onAddToBasket,
   onToggleLike,
+  onAddReview,
+  onDeleteReview,
 }: {
   products: FeaturedShoe[];
+  currentUser: AppUser | null;
   likedShoeIds: string[];
   onBackToShop: () => void;
   onSelectShoe: (shoe: FeaturedShoe, angle?: AngleKey) => void;
   onAddToBasket: (shoe: FeaturedShoe, size: string) => void;
   onToggleLike: (shoe: FeaturedShoe) => void;
+  onAddReview: (
+    shoeId: string,
+    review: { rating: number; title: string; comment: string; location: string }
+  ) => Promise<void>;
+  onDeleteReview: (shoeId: string, reviewId: string) => Promise<void>;
 }) {
   const { shoeId } = useParams<{ shoeId: string }>();
   const [searchParams] = useSearchParams();
 
-  const shoe =
-    products.find((item) => item.id === shoeId) ??
-    products[0] ??
-    FEATURED_SHOES[0];
+  const shoe = products.find((item) => item.id === shoeId) ?? products[0];
+  if (!shoe) {
+    return (
+      <div className="flex min-h-[70vh] flex-col items-center justify-center px-6 pt-28 text-center">
+        <p className="text-sm text-zinc-300">No shoes found in catalog.</p>
+        <button
+          type="button"
+          onClick={onBackToShop}
+          className="mt-4 cursor-pointer rounded-full bg-white px-6 py-2.5 text-xs font-bold text-black uppercase"
+        >
+          Back to Storefront
+        </button>
+      </div>
+    );
+  }
+
   const rawAngle = searchParams.get("angle") as AngleKey | null;
   const validAngle: AngleKey =
-    rawAngle && rawAngle in shoe.angles ? rawAngle : "lateral";
+    rawAngle && shoe.angles[rawAngle] ? rawAngle : "lateral";
 
   return (
     <ProductDetailPage
       key={shoe.id}
       shoe={shoe}
       allProducts={products}
+      currentUser={currentUser}
       isLiked={likedShoeIds.includes(shoe.id)}
       initialAngle={validAngle}
       onBackToShop={onBackToShop}
       onSelectShoe={onSelectShoe}
       onAddToBasket={onAddToBasket}
       onToggleLike={onToggleLike}
+      onAddReview={onAddReview}
+      onDeleteReview={onDeleteReview}
     />
   );
 }
@@ -78,15 +117,14 @@ export function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // MERN Synchronized Database State
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() =>
     storeApi.getSessionUser()
   );
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [products, setProducts] = useState<FeaturedShoe[]>(FEATURED_SHOES);
+  const [products, setProducts] = useState<FeaturedShoe[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [toasts, setToasts] = useState<ToastNotice[]>([]);
 
-  // Category & Section Navigation State
   const [activeCategory, setActiveCategory] =
     useState<ShoeCategory>("All Shoes");
   const [isCategoryDrawerOpen, setIsCategoryDrawerOpen] = useState(false);
@@ -95,22 +133,49 @@ export function App() {
     "home" | "shop-now" | "about-us" | null
   >(null);
 
-  // Overlays & Basket State
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<AuthModalMode>("login");
   const [authPromptMsg, setAuthPromptMsg] = useState<string | null>(null);
   const [isBasketOpen, setIsBasketOpen] = useState(false);
   const [isLikedOpen, setIsLikedOpen] = useState(false);
-  const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const [basketItems, setBasketItems] = useState<BasketItem[]>(() =>
+    loadPersistedBasket(storeApi.getSessionUser()?._id)
+  );
 
-  // Load initial database collections
+  const notify = useCallback(
+    (title: string, type: ToastNotice["type"] = "info") => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setToasts((prev) => [...prev.slice(-2), { id, title, type }]);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 3400);
+    },
+    []
+  );
+
+  // Hydrate products & session from Express HttpOnly cookie on boot
   useEffect(() => {
     void storeApi.getProducts().then(setProducts);
-    void storeApi.getUsers().then(setUsers);
-    void storeApi.getOrders().then(setOrders);
+    void storeApi.getCurrentUser().then((sessionUser) => {
+      setCurrentUser(sessionUser);
+      setBasketItems(loadPersistedBasket(sessionUser?._id));
+      if (sessionUser) {
+        void storeApi.getOrders().then(setOrders);
+        if (sessionUser.role === "admin") {
+          void storeApi.getUsers().then(setUsers);
+        }
+      }
+    });
   }, []);
 
-  // Scroll smoothly to target section when navigating back to "/"
+  // Persist basket across page refreshes
+  useEffect(() => {
+    localStorage.setItem(
+      getBasketKey(currentUser?._id),
+      JSON.stringify(basketItems)
+    );
+  }, [basketItems, currentUser?._id]);
+
   useEffect(() => {
     if (location.pathname !== "/" || !pendingSection) return;
 
@@ -119,9 +184,7 @@ export function App() {
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
         const el = document.getElementById(pendingSection);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth" });
-        }
+        if (el) el.scrollIntoView({ behavior: "smooth" });
         if (pendingSection === "shop-now") {
           setShopTriggerCount((prev) => prev + 1);
         }
@@ -166,10 +229,7 @@ export function App() {
       setPendingSection("shop-now");
       navigate("/");
     } else {
-      const shopEl = document.getElementById("shop-now");
-      if (shopEl) {
-        shopEl.scrollIntoView({ behavior: "smooth" });
-      }
+      document.getElementById("shop-now")?.scrollIntoView({ behavior: "smooth" });
       setShopTriggerCount((prev) => prev + 1);
     }
   };
@@ -184,10 +244,7 @@ export function App() {
       setPendingSection("about-us");
       navigate("/");
     } else {
-      const aboutEl = document.getElementById("about-us");
-      if (aboutEl) {
-        aboutEl.scrollIntoView({ behavior: "smooth" });
-      }
+      document.getElementById("about-us")?.scrollIntoView({ behavior: "smooth" });
     }
   };
 
@@ -198,7 +255,6 @@ export function App() {
     navigate(`/shoe/${shoe.id}?angle=${initialAngle}`);
   };
 
-  // SIGNED-IN GUARD: Adding to Basket is only allowed for signed-in users
   const handleAddToBasket = (shoe: FeaturedShoe, size = "US 9") => {
     if (!currentUser) {
       promptSignIn(
@@ -206,25 +262,57 @@ export function App() {
       );
       return;
     }
-    if (shoe.stock <= 0) return;
+    if (shoe.stock <= 0) {
+      notify(`${shoe.name} is out of stock.`, "error");
+      return;
+    }
 
     setBasketItems((prev) => {
       const existingIdx = prev.findIndex(
         (item) => item.shoe.id === shoe.id && item.size === size
       );
       if (existingIdx > -1) {
+        const nextQty = prev[existingIdx].quantity + 1;
+        if (nextQty > shoe.stock) {
+          notify(`Only ${shoe.stock} pair(s) available in stock.`, "error");
+          return prev;
+        }
         const updated = [...prev];
-        updated[existingIdx] = {
-          ...updated[existingIdx],
-          quantity: updated[existingIdx].quantity + 1,
-        };
+        updated[existingIdx] = { ...updated[existingIdx], quantity: nextQty };
+        notify(`Updated ${shoe.name} (${size}) to ${nextQty}`, "success");
         return updated;
       }
+      notify(`Added ${shoe.name} (${size}) to basket`, "success");
       return [...prev, { shoe, size, quantity: 1 }];
     });
   };
 
-  // SIGNED-IN GUARD: Liking/Favouriting shoes is only allowed for signed-in users
+  const handleUpdateBasketQty = (
+    shoeId: string,
+    size: string,
+    nextQty: number
+  ) => {
+    if (nextQty <= 0) {
+      setBasketItems((prev) =>
+        prev.filter((item) => !(item.shoe.id === shoeId && item.size === size))
+      );
+      return;
+    }
+    const liveShoe = products.find((p) => p.id === shoeId);
+    const maxStock = liveShoe?.stock ?? nextQty;
+    if (nextQty > maxStock) {
+      notify(`Stock limit reached (${maxStock} left).`, "error");
+      return;
+    }
+    setBasketItems((prev) =>
+      prev.map((item) =>
+        item.shoe.id === shoeId && item.size === size
+          ? { ...item, quantity: nextQty }
+          : item
+      )
+    );
+  };
+
   const handleToggleLike = async (shoe: FeaturedShoe) => {
     if (!currentUser) {
       promptSignIn("Please sign in first to save shoes to your Liked list.");
@@ -235,11 +323,16 @@ export function App() {
       ? currentUser.likedShoeIds.filter((id) => id !== shoe.id)
       : [...currentUser.likedShoeIds, shoe.id];
 
-    const updatedUser = await storeApi.updateUser(currentUser._id, {
+    const updatedUser = await storeApi.updateSelfProfile({
       likedShoeIds: nextLiked,
     });
     setCurrentUser(updatedUser);
-    setUsers(await storeApi.getUsers());
+    notify(
+      alreadyLiked
+        ? `Removed ${shoe.name} from Liked`
+        : `Saved ${shoe.name} to Liked`,
+      "info"
+    );
   };
 
   const handleRemoveBasketItem = (shoeId: string, size: string) => {
@@ -256,21 +349,18 @@ export function App() {
     setIsBasketOpen(true);
   };
 
-  // CHECKOUT SUBMISSION: Creates order, deducts stock in DB, clears basket
   const handleSubmitOrder = async (payload: {
     paymentMethod: PaymentMethodType;
     shippingAddress: ShippingAddressRecord;
   }): Promise<OrderRecord> => {
-    if (!currentUser) {
-      throw new Error("Sign in required");
-    }
+    if (!currentUser) throw new Error("Sign in required");
     const items = basketItems.map((b) => ({
       shoeId: b.shoe.id,
       shoeName: b.shoe.name,
       size: b.size,
       quantity: b.quantity,
       price: b.shoe.price,
-      imageUrl: b.shoe.angles.pairAngle,
+      imageUrl: b.shoe.angles.lateral,
     }));
     const totalAmount = items.reduce(
       (sum, i) => sum + i.price * i.quantity,
@@ -290,6 +380,7 @@ export function App() {
     setProducts(updatedProducts);
     setOrders(await storeApi.getOrders());
     setBasketItems([]);
+    notify(`Order ${order.orderNumber} confirmed!`, "success");
     return order;
   };
 
@@ -305,7 +396,6 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#070709] text-white">
-      {/* Header Navigation with Categories Drawer, Guest vs Signed-In vs Admin Controls */}
       <Navbar
         basketCount={totalBasketCount}
         likedCount={likedShoeObjects.length}
@@ -324,9 +414,12 @@ export function App() {
         onNavigateAccount={() => navigate("/account")}
         onNavigateAdmin={() => navigate("/admin")}
         onSignOut={() => {
-          storeApi.setSessionUser(null);
+          void storeApi.logout();
           setCurrentUser(null);
+          setOrders([]);
+          setUsers([]);
           setBasketItems([]);
+          notify("Signed out.", "info");
           navigate("/");
         }}
       />
@@ -338,10 +431,13 @@ export function App() {
             element={
               <>
                 <HeroCylinderStage
+                  products={products}
+                  isAdmin={currentUser?.role === "admin"}
                   onShopNowClick={handleNavigateShopNow}
                   onSelectShoeToBuy={(shoe) =>
                     handleOpenShoeDetail(shoe, "lateral")
                   }
+                  onOpenAdmin={() => navigate("/admin")}
                 />
                 <ShopShowcase
                   products={products}
@@ -350,7 +446,6 @@ export function App() {
                   shopTriggerCount={shopTriggerCount}
                   onCategoryChange={setActiveCategory}
                   onSelectShoeToBuy={handleOpenShoeDetail}
-                  onQuickAddToBasket={(shoe) => handleAddToBasket(shoe, "US 9")}
                   onToggleLike={handleToggleLike}
                 />
                 <AboutUsSection onExploreShop={handleNavigateShopNow} />
@@ -363,11 +458,25 @@ export function App() {
             element={
               <ProductDetailRoute
                 products={products}
+                currentUser={currentUser}
                 likedShoeIds={currentUser?.likedShoeIds ?? []}
                 onBackToShop={handleNavigateShopNow}
                 onSelectShoe={handleOpenShoeDetail}
                 onAddToBasket={handleAddToBasket}
                 onToggleLike={handleToggleLike}
+                onAddReview={async (shoeId, review) => {
+                  const next = await storeApi.addProductReview(shoeId, review);
+                  setProducts(next);
+                  notify("Review posted!", "success");
+                }}
+                onDeleteReview={async (shoeId, reviewId) => {
+                  const next = await storeApi.deleteProductReview(
+                    shoeId,
+                    reviewId
+                  );
+                  setProducts(next);
+                  notify("Review deleted.", "info");
+                }}
               />
             }
           />
@@ -399,12 +508,9 @@ export function App() {
                   orders={orders}
                   onBackHome={handleNavigateHome}
                   onUpdateProfile={async (updates) => {
-                    const updated = await storeApi.updateUser(
-                      currentUser._id,
-                      updates
-                    );
+                    const updated = await storeApi.updateSelfProfile(updates);
                     setCurrentUser(updated);
-                    setUsers(await storeApi.getUsers());
+                    notify("Account updated!", "success");
                   }}
                 />
               ) : (
@@ -425,29 +531,41 @@ export function App() {
                   onCreateUser={async (data) => {
                     await storeApi.createUser(data);
                     setUsers(await storeApi.getUsers());
+                    notify(`User @${data.username} created`, "success");
                   }}
                   onUpdateUser={async (userId, updates) => {
                     const updated = await storeApi.updateUser(userId, updates);
-                    if (currentUser._id === userId) {
-                      setCurrentUser(updated);
-                    }
+                    if (currentUser._id === userId) setCurrentUser(updated);
                     setUsers(await storeApi.getUsers());
+                    notify("User updated", "success");
                   }}
                   onDeleteUser={async (userId) => {
                     await storeApi.deleteUser(userId);
                     setUsers(await storeApi.getUsers());
+                    notify("User removed", "info");
+                  }}
+                  onUploadShoeAngles={(files) =>
+                    storeApi.uploadShoeAngles(files)
+                  }
+                  onSeedDemoProducts={async () => {
+                    const next = await storeApi.seedDemoProducts();
+                    setProducts(next);
+                    notify("Starter demo shoes loaded", "success");
                   }}
                   onCreateProduct={async (data) => {
                     await storeApi.createProduct(data);
                     setProducts(await storeApi.getProducts());
+                    notify(`${data.name} added to store!`, "success");
                   }}
                   onUpdateProduct={async (shoeId, updates) => {
                     const next = await storeApi.updateProduct(shoeId, updates);
                     setProducts(next);
+                    notify("Shoe inventory saved", "success");
                   }}
                   onDeleteProduct={async (shoeId) => {
                     const next = await storeApi.deleteProduct(shoeId);
                     setProducts(next);
+                    notify("Shoe removed", "info");
                   }}
                   onUpdateOrderStatus={async (
                     orderId: string,
@@ -458,10 +576,12 @@ export function App() {
                       status
                     );
                     setOrders(next);
+                    notify(`Order status → ${status}`, "success");
                   }}
                   onDeleteOrder={async (orderId: string) => {
                     const next = await storeApi.deleteOrder(orderId);
                     setOrders(next);
+                    notify("Order deleted", "info");
                   }}
                 />
               ) : (
@@ -474,7 +594,6 @@ export function App() {
         </Routes>
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-white/10 bg-[#050507] py-8 text-center text-xs text-zinc-500">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 sm:flex-row md:px-10">
           <button
@@ -503,7 +622,6 @@ export function App() {
         </div>
       </footer>
 
-      {/* Nike-Style Slide-Out Shoes Category Drawer */}
       <CategoryDrawer
         isOpen={isCategoryDrawerOpen}
         activeCategory={activeCategory}
@@ -512,7 +630,6 @@ export function App() {
         onSelectCategory={handleSelectCategory}
       />
 
-      {/* Sign In / Register / Forgot Password -> Change Password Dashboard Modal */}
       <AuthModal
         key={isLoginOpen ? `open-${authModalMode}` : "closed"}
         isOpen={isLoginOpen}
@@ -524,11 +641,15 @@ export function App() {
         }}
         onAuthSuccess={async (user) => {
           setCurrentUser(user);
-          setUsers(await storeApi.getUsers());
+          setBasketItems(loadPersistedBasket(user._id));
+          setOrders(await storeApi.getOrders());
+          if (user.role === "admin") {
+            setUsers(await storeApi.getUsers());
+          }
+          notify(`Signed in as @${user.username}`, "success");
         }}
       />
 
-      {/* Liked Shoes Drawer (Signed-In Users) */}
       <LikedShoesDrawer
         isOpen={isLikedOpen}
         likedShoes={likedShoeObjects}
@@ -541,13 +662,20 @@ export function App() {
         }}
       />
 
-      {/* Basket Drawer */}
       <BasketDrawer
         isOpen={isBasketOpen}
         items={basketItems}
         onClose={() => setIsBasketOpen(false)}
+        onUpdateQuantity={handleUpdateBasketQty}
         onRemoveItem={handleRemoveBasketItem}
         onProceedToCheckout={() => navigate("/checkout")}
+      />
+
+      <ToastContainer
+        toasts={toasts}
+        onDismiss={(id) =>
+          setToasts((prev) => prev.filter((item) => item.id !== id))
+        }
       />
     </div>
   );

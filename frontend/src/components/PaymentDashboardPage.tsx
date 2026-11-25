@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { formatPHP } from "../data/shoeCatalog";
 import type { BasketItem } from "./BasketDrawer";
+import { resolveAssetUrl } from "../utils/useTransparentCutout";
 import type {
   AppUser,
   OrderRecord,
@@ -603,7 +604,7 @@ export function PaymentDashboardPage({
                       className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 p-3"
                     >
                       <img
-                        src={item.shoe.angles.pairAngle}
+                        src={resolveAssetUrl(item.shoe.angles.lateral)}
                         alt={item.shoe.name}
                         className="h-14 w-14 rounded-xl bg-[#F5F5F5] object-contain p-1"
                       />

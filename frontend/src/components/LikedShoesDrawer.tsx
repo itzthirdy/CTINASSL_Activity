@@ -1,6 +1,7 @@
 import { Heart, ShoppingBag, Trash2, X } from "lucide-react";
 import { formatPHP } from "../data/shoeCatalog";
 import type { FeaturedShoe } from "../data/shoeCatalog";
+import { resolveAssetUrl } from "../utils/useTransparentCutout";
 
 interface LikedShoesDrawerProps {
   isOpen: boolean;
@@ -74,7 +75,7 @@ export function LikedShoesDrawer({
                     className="h-16 w-16 shrink-0 cursor-pointer overflow-hidden rounded-xl bg-[#F5F5F5] p-1"
                   >
                     <img
-                      src={shoe.angles.pairAngle}
+                      src={resolveAssetUrl(shoe.angles.lateral)}
                       alt={shoe.name}
                       className="h-full w-full object-contain"
                     />

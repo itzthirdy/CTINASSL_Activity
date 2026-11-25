@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { formatPHP } from "../data/shoeCatalog";
 import type { AppUser, OrderRecord } from "../services/api";
+import { resolveAssetUrl } from "../utils/useTransparentCutout";
 
 interface UserAccountPageProps {
   user: AppUser;
@@ -30,7 +31,7 @@ export function UserAccountPage({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
-  const [password, setPassword] = useState(user.password);
+  const [password, setPassword] = useState("");
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,12 +54,16 @@ export function UserAccountPage({
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
-    await onUpdateProfile({
+    const updates: Partial<Pick<AppUser, "username" | "email" | "password">> = {
       username: username.trim(),
       email: email.trim().toLowerCase(),
-      password,
-    });
-    setSavedMsg("Profile & password updated in database (CRUD Update)!");
+    };
+    if (password.trim().length >= 6) {
+      updates.password = password;
+    }
+    await onUpdateProfile(updates);
+    setPassword("");
+    setSavedMsg("Profile updated in database (CRUD Update)!");
     setTimeout(() => setSavedMsg(null), 3000);
   };
 
@@ -147,15 +152,15 @@ export function UserAccountPage({
 
               <div>
                 <label className="block text-xs font-medium text-zinc-300">
-                  Password
+                  New Password (optional)
                 </label>
                 <div className="mt-1.5 flex items-center gap-2.5 rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5">
                   <Lock className="h-4 w-4 text-amber-400" />
                   <input
-                    type="text"
+                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    required
+                    placeholder="Leave blank to keep current password"
                     className="w-full bg-transparent text-sm text-white focus:outline-none"
                   />
                 </div>
@@ -220,7 +225,7 @@ export function UserAccountPage({
                         >
                           <div className="flex items-center gap-2.5">
                             <img
-                              src={item.imageUrl}
+                              src={resolveAssetUrl(item.imageUrl)}
                               alt={item.shoeName}
                               className="h-10 w-10 rounded-lg bg-[#F5F5F5] object-contain p-1"
                             />

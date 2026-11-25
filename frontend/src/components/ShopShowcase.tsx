@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { animate, stagger } from "animejs";
-import { Heart } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Heart, Search, X } from "lucide-react";
 import {
-  formatPHP,
-  SHOE_ANGLE_OPTIONS,
-  SHOE_CATEGORIES,
-} from "../data/shoeCatalog";
+  apply3DPerspectiveTilt,
+  playShoeHoverLift,
+  playShopEntrance,
+  reset3DPerspectiveTilt,
+} from "../animations/shoeAnimations";
+import { formatPHP, SHOE_CATEGORIES } from "../data/shoeCatalog";
 import type { AngleKey, FeaturedShoe, ShoeCategory } from "../data/shoeCatalog";
 import {
   preloadShoeCutouts,
@@ -19,80 +20,44 @@ interface ShopShowcaseProps {
   shopTriggerCount: number;
   onCategoryChange: (cat: ShoeCategory) => void;
   onSelectShoeToBuy: (shoe: FeaturedShoe, initialAngle?: AngleKey) => void;
-  onQuickAddToBasket: (shoe: FeaturedShoe) => void;
   onToggleLike: (shoe: FeaturedShoe) => void;
 }
 
-interface ShoePopCardProps {
-  shoe: FeaturedShoe;
-  index: number;
-  isLiked: boolean;
-  onSelectShoeToBuy: (shoe: FeaturedShoe, initialAngle?: AngleKey) => void;
-  onQuickAddToBasket: (shoe: FeaturedShoe) => void;
-  onToggleLike: (shoe: FeaturedShoe) => void;
-}
+type SortOption = "featured" | "price-asc" | "price-desc" | "newest";
 
 function ShoePopCard({
   shoe,
   index,
   isLiked,
   onSelectShoeToBuy,
-  onQuickAddToBasket,
   onToggleLike,
-}: ShoePopCardProps) {
+}: {
+  shoe: FeaturedShoe;
+  index: number;
+  isLiked: boolean;
+  onSelectShoeToBuy: (shoe: FeaturedShoe, initialAngle?: AngleKey) => void;
+  onToggleLike: (shoe: FeaturedShoe) => void;
+}) {
+  const cardBoxRef = useRef<HTMLDivElement | null>(null);
   const shoeImgRef = useRef<HTMLImageElement | null>(null);
+  const sheenRef = useRef<HTMLDivElement | null>(null);
 
-  const [activeAngle, setActiveAngle] = useState<AngleKey>("lateral");
-  const [isHovered, setIsHovered] = useState(false);
-
-  const cutoutSrc = useShoeCutoutUrl(shoe.angles[activeAngle]);
-
-  const animatePlacementChange = (targetAngle: AngleKey, entering: boolean) => {
-    setActiveAngle(targetAngle);
-    if (shoeImgRef.current) {
-      if (entering) {
-        animate(shoeImgRef.current, {
-          translateY: [14, -10],
-          translateX: [-6, 4],
-          rotate: [0, -5],
-          scale: [0.95, 1.07],
-          duration: 520,
-          ease: "outBack(1.85)",
-        });
-      } else {
-        animate(shoeImgRef.current, {
-          translateY: 0,
-          translateX: 0,
-          rotate: 0,
-          scale: 1,
-          duration: 420,
-          ease: "outExpo",
-        });
-      }
-    }
-  };
+  // Shop always displays ONLY the Lateral Profile cutout
+  const lateralCutoutSrc = useShoeCutoutUrl(
+    shoe.angles.lateral,
+    shoe.cutoutSensitivity ?? 50
+  );
 
   const handleMouseEnter = () => {
-    setIsHovered(true);
-    animatePlacementChange("pairAngle", true);
+    playShoeHoverLift(shoeImgRef.current, shoe.animationPreset ?? "studio-float");
   };
 
   const handleMouseLeave = () => {
-    setIsHovered(false);
-    animatePlacementChange("lateral", false);
-  };
-
-  const handleThumbHover = (angleKey: AngleKey) => {
-    setActiveAngle(angleKey);
-    if (shoeImgRef.current) {
-      animate(shoeImgRef.current, {
-        translateY: [-4, -12],
-        rotate: [-2, -6],
-        scale: [1.02, 1.08],
-        duration: 360,
-        ease: "outBack(1.7)",
-      });
-    }
+    reset3DPerspectiveTilt(
+      cardBoxRef.current,
+      shoeImgRef.current,
+      sheenRef.current
+    );
   };
 
   return (
@@ -100,11 +65,30 @@ function ShoePopCard({
       data-shoe-index={index}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onClick={() => onSelectShoeToBuy(shoe, activeAngle)}
+      onClick={() => onSelectShoeToBuy(shoe, "lateral")}
       className="nike-pop-card group relative flex cursor-pointer flex-col opacity-0"
     >
-      {/* Square Studio Box matching Nike Store & nike.png (#F5F5F5) with HUGE edge-filling shoe */}
-      <div className="relative aspect-[1/1] w-full overflow-hidden bg-[#F5F5F5] transition-shadow duration-300 group-hover:shadow-[0_20px_50px_rgba(0,0,0,0.12)]">
+      {/* Square Studio Pedestal Box (#F5F5F5) with 3D Perspective Tilt + Specular Sheen */}
+      <div
+        ref={cardBoxRef}
+        onPointerMove={(e) =>
+          apply3DPerspectiveTilt(
+            cardBoxRef.current,
+            shoeImgRef.current,
+            sheenRef.current,
+            e
+          )
+        }
+        className="relative aspect-[1/1] w-full overflow-hidden rounded-lg bg-[#F5F5F5] transition-[box-shadow,transform] duration-200 ease-out group-hover:shadow-[0_22px_50px_rgba(0,0,0,0.14)]"
+        style={{ transformStyle: "preserve-3d" }}
+      >
+        {/* Moving specular lighting overlay */}
+        <div
+          ref={sheenRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity duration-300"
+        />
+
         {/* Heart / Like Toggle Button */}
         <button
           type="button"
@@ -122,61 +106,25 @@ function ShoePopCard({
           />
         </button>
 
-        {/* Main Huge Shoe Photo */}
-        <div className="flex h-full w-full items-center justify-center p-4 pb-10 sm:p-5 sm:pb-12">
+        {/* Grounded 3D elliptical contact shadow */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-7 left-1/2 h-5 w-3/4 -translate-x-1/2 rounded-full bg-black/20 blur-md transition-transform duration-300 group-hover:scale-90 group-hover:opacity-75"
+        />
+
+        {/* Lateral Profile Only Shoe Photo */}
+        <div className="flex h-full w-full items-center justify-center p-5 sm:p-6">
           <img
             ref={shoeImgRef}
-            src={cutoutSrc}
-            alt={`${shoe.name} - ${activeAngle}`}
+            src={lateralCutoutSrc}
+            alt={`${shoe.name} — Lateral Profile`}
             draggable={false}
-            className="max-h-full max-w-full scale-[1.06] object-contain drop-shadow-[0_18px_22px_rgba(0,0,0,0.16)] will-change-transform select-none"
+            className="relative z-10 max-h-full max-w-full scale-[1.06] object-contain drop-shadow-[0_18px_22px_rgba(0,0,0,0.18)] will-change-transform select-none"
           />
-        </div>
-
-        {/* Bottom Hover Bar: 6 Multi-Angle Placement Strip + Quick Basket Action */}
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className={`absolute right-3 bottom-3 left-3 z-20 flex items-center justify-between gap-2 rounded-xl border border-black/10 bg-white/95 p-2 shadow-md backdrop-blur-md transition-all duration-300 ${
-            isHovered
-              ? "translate-y-0 opacity-100"
-              : "pointer-events-none translate-y-4 opacity-0"
-          }`}
-        >
-          <div className="flex items-center gap-1 overflow-x-auto">
-            {SHOE_ANGLE_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onMouseEnter={() => handleThumbHover(opt.key)}
-                onClick={() => onSelectShoeToBuy(shoe, opt.key)}
-                className={`h-9 w-9 shrink-0 cursor-pointer overflow-hidden rounded-lg border transition-all ${
-                  activeAngle === opt.key
-                    ? "border-[#111111] ring-2 ring-[#111111]/20"
-                    : "border-zinc-200 opacity-75 hover:opacity-100"
-                }`}
-                title={opt.label}
-              >
-                <img
-                  src={shoe.angles[opt.key]}
-                  alt={opt.label}
-                  className="h-full w-full bg-[#F5F5F5] object-cover"
-                />
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            disabled={shoe.stock <= 0}
-            onClick={() => onQuickAddToBasket(shoe)}
-            className="shrink-0 cursor-pointer rounded-lg bg-[#111111] px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-          >
-            {shoe.stock > 0 ? "+ Basket" : "Sold Out"}
-          </button>
         </div>
       </div>
 
-      {/* Bottom Typography Stack matching Reference/Shoes/nike.png + Live Stock Count */}
+      {/* Bottom Typography Stack */}
       <div className="pt-3.5 text-left">
         <div className="flex items-center justify-between">
           <p className="text-[15px] font-semibold text-[#D33918]">{shoe.badge}</p>
@@ -189,16 +137,14 @@ function ShoePopCard({
                   : "text-emerald-700"
             }`}
           >
-            {shoe.stock <= 0
-              ? "Out of Stock"
-              : `${shoe.stock} stocks left`}
+            {shoe.stock <= 0 ? "Out of Stock" : `${shoe.stock} stocks left`}
           </span>
         </div>
         <h3 className="mt-0.5 text-[16px] font-semibold text-[#111111] group-hover:underline">
           {shoe.name}
         </h3>
         <p className="text-[15px] text-[#707072]">{shoe.category}</p>
-        <p className="mt-2 text-[16px] font-semibold text-[#111111]">
+        <p className="font-mono-tabular mt-2 text-[16px] font-semibold text-[#111111]">
           {formatPHP(shoe.price)}
         </p>
       </div>
@@ -213,53 +159,65 @@ export function ShopShowcase({
   shopTriggerCount,
   onCategoryChange,
   onSelectShoeToBuy,
-  onQuickAddToBasket,
   onToggleLike,
 }: ShopShowcaseProps) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const hasPlayedInitialScroll = useRef(false);
 
-  const filteredShoes =
-    activeCategory === "All Shoes"
-      ? products
-      : products.filter((item) => item.category === activeCategory);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("featured");
+  const [selectedSize, setSelectedSize] = useState<string>("All");
+  const [inStockOnly, setInStockOnly] = useState(false);
 
-  useEffect(() => {
-    const allUrls: string[] = [];
-    for (const shoe of products) {
-      allUrls.push(
-        shoe.angles.lateral,
-        shoe.angles.pairAngle,
-        shoe.angles.medial,
-        shoe.angles.topDown,
-        shoe.angles.outsole,
-        shoe.angles.heel
-      );
+  const availableSizes = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      for (const s of p.sizes) set.add(s);
     }
-    preloadShoeCutouts(allUrls);
+    return Array.from(set);
   }, [products]);
 
-  // Anime.js v4 1-by-1 Staggered Pop-Up Sequence
-  const playOneByOnePopUp = useCallback(() => {
+  const filteredShoes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const list = products.filter((item) => {
+      if (activeCategory !== "All Shoes" && item.category !== activeCategory) {
+        return false;
+      }
+      if (inStockOnly && item.stock <= 0) return false;
+      if (selectedSize !== "All" && !item.sizes.includes(selectedSize)) {
+        return false;
+      }
+      if (q) {
+        const hay = `${item.name} ${item.sku} ${item.colorwayName} ${item.category}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (sortBy === "price-asc") {
+      return [...list].sort((a, b) => a.price - b.price);
+    }
+    if (sortBy === "price-desc") {
+      return [...list].sort((a, b) => b.price - a.price);
+    }
+    if (sortBy === "newest") {
+      return [...list].reverse();
+    }
+    return list;
+  }, [products, activeCategory, searchQuery, sortBy, selectedSize, inStockOnly]);
+
+  // Preload ONLY lateral profile cutouts for the Shop grid
+  useEffect(() => {
+    for (const shoe of products) {
+      preloadShoeCutouts([shoe.angles.lateral], shoe.cutoutSensitivity ?? 50);
+    }
+  }, [products]);
+
+  const playPopAnimation = useCallback(() => {
     const root = sectionRef.current;
     if (!root) return;
-
     const cards = root.querySelectorAll<HTMLElement>(".nike-pop-card");
-    if (!cards.length) return;
-
-    cards.forEach((card) => {
-      card.style.opacity = "0";
-      card.style.transform = "translateY(80px) scale(0.82)";
-    });
-
-    animate(cards, {
-      opacity: [0, 1],
-      translateY: [80, 0],
-      scale: [0.82, 1],
-      delay: stagger(200, { start: 80 }),
-      duration: 820,
-      ease: "outBack(1.65)",
-    });
+    playShopEntrance(cards);
   }, []);
 
   useEffect(() => {
@@ -271,24 +229,36 @@ export function ShopShowcase({
         for (const entry of entries) {
           if (entry.isIntersecting && !hasPlayedInitialScroll.current) {
             hasPlayedInitialScroll.current = true;
-            playOneByOnePopUp();
+            playPopAnimation();
           }
         }
       },
-      { threshold: 0.16 }
+      { threshold: 0.12 }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [playOneByOnePopUp]);
+  }, [playPopAnimation]);
 
-  // Replay 1-by-1 pop-up whenever user clicks "Shop Now" or switches categories
   useEffect(() => {
     if (shopTriggerCount > 0 || hasPlayedInitialScroll.current) {
       hasPlayedInitialScroll.current = true;
-      playOneByOnePopUp();
+      playPopAnimation();
     }
-  }, [shopTriggerCount, activeCategory, filteredShoes.length, playOneByOnePopUp]);
+  }, [
+    shopTriggerCount,
+    activeCategory,
+    filteredShoes.length,
+    playPopAnimation,
+  ]);
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setSortBy("featured");
+    setSelectedSize("All");
+    setInStockOnly(false);
+    onCategoryChange("All Shoes");
+  };
 
   return (
     <section
@@ -298,12 +268,11 @@ export function ShopShowcase({
     >
       <div className="mx-auto max-w-7xl px-6 md:px-10">
         {/* Section Header + Category Filter Pills */}
-        <div className="mb-10 flex flex-col justify-between gap-4 border-b border-zinc-200 pb-5 lg:flex-row lg:items-center">
+        <div className="mb-6 flex flex-col justify-between gap-4 border-b border-zinc-200 pb-5 lg:flex-row lg:items-center">
           <h2 className="font-sport text-3xl tracking-wide text-[#111111] uppercase italic sm:text-4xl">
-            FEATURED COURT RELEASES
+            FEATURED RELEASES
           </h2>
 
-          {/* Category Filter Tabs */}
           <div className="flex flex-wrap items-center gap-2">
             {SHOE_CATEGORIES.map((cat) => {
               const isSelected = activeCategory === cat.id;
@@ -325,20 +294,109 @@ export function ShopShowcase({
           </div>
         </div>
 
-        {/* 3-Column Shoe Grid matching Reference/Shoes/nike.png */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3 md:gap-5">
-          {filteredShoes.map((shoe, idx) => (
-            <ShoePopCard
-              key={shoe.id}
-              shoe={shoe}
-              index={idx}
-              isLiked={likedShoeIds.includes(shoe.id)}
-              onSelectShoeToBuy={onSelectShoeToBuy}
-              onQuickAddToBasket={onQuickAddToBasket}
-              onToggleLike={onToggleLike}
+        {/* Search, Sort, US Size & In-Stock Toolbar */}
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <div className="relative w-full sm:max-w-xs">
+            <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search model, SKU, colorway..."
+              className="w-full rounded-full border border-zinc-200 bg-[#F5F5F5] py-2 pr-9 pl-10 text-xs text-[#111111] placeholder-zinc-500 focus:border-[#111111] focus:bg-white focus:outline-none"
             />
-          ))}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear search"
+                className="absolute top-1/2 right-3 -translate-y-1/2 text-zinc-400 hover:text-[#111111]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            <select
+              value={selectedSize}
+              onChange={(e) => setSelectedSize(e.target.value)}
+              aria-label="Filter by US size"
+              className="rounded-full border border-zinc-200 bg-[#F5F5F5] px-3.5 py-2 font-medium text-[#111111] focus:border-[#111111] focus:outline-none"
+            >
+              <option value="All">Size: All</option>
+              {availableSizes.map((sz) => (
+                <option key={sz} value={sz}>
+                  {sz}
+                </option>
+              ))}
+            </select>
+
+            <label className="flex cursor-pointer items-center gap-1.5 rounded-full border border-zinc-200 bg-[#F5F5F5] px-3.5 py-2 font-medium text-[#111111]">
+              <input
+                type="checkbox"
+                checked={inStockOnly}
+                onChange={(e) => setInStockOnly(e.target.checked)}
+                className="accent-[#111111]"
+              />
+              <span>In Stock</span>
+            </label>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              aria-label="Sort shoes"
+              className="rounded-full border border-zinc-200 bg-[#F5F5F5] px-3.5 py-2 font-medium text-[#111111] focus:border-[#111111] focus:outline-none"
+            >
+              <option value="featured">Sort: Featured</option>
+              <option value="price-asc">Price: Low to High</option>
+              <option value="price-desc">Price: High to Low</option>
+              <option value="newest">Newest Added</option>
+            </select>
+
+            <span className="font-mono-tabular text-xs text-zinc-500">
+              {filteredShoes.length} pair{filteredShoes.length === 1 ? "" : "s"}
+            </span>
+          </div>
         </div>
+
+        {/* 3-Column Lateral-Only Grid */}
+        {filteredShoes.length === 0 ? (
+          <div className="rounded-2xl border border-zinc-200 bg-[#F5F5F5] p-12 text-center">
+            <p className="font-sport text-2xl text-[#111111] uppercase italic">
+              {products.length === 0
+                ? "Catalog Currently Empty"
+                : "No Matching Shoes Found"}
+            </p>
+            <p className="mt-1.5 text-xs text-[#707072]">
+              {products.length === 0
+                ? "Add new shoes (with Nike lateral photos) in the Admin Panel to display them here."
+                : "Try clearing your search or adjusting size/category filters."}
+            </p>
+            {products.length > 0 && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-4 cursor-pointer rounded-full bg-[#111111] px-6 py-2.5 text-xs font-semibold text-white hover:bg-zinc-800"
+              >
+                Reset Filters
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3 md:gap-5">
+            {filteredShoes.map((shoe, idx) => (
+              <ShoePopCard
+                key={shoe.id}
+                shoe={shoe}
+                index={idx}
+                isLiked={likedShoeIds.includes(shoe.id)}
+                onSelectShoeToBuy={onSelectShoeToBuy}
+                onToggleLike={onToggleLike}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

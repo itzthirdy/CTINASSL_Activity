@@ -1,24 +1,50 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { animate } from "animejs";
 import {
+  AlertTriangle,
   ArrowLeft,
   Boxes,
   Check,
+  DollarSign,
   Edit3,
   Package,
+  Palette,
+  Play,
   Plus,
+  Search,
+  Sparkles,
   Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
-import { formatPHP } from "../data/shoeCatalog";
-import type { FeaturedShoe, ShoeCategory } from "../data/shoeCatalog";
+import { playShoePresetAnimation } from "../animations/shoeAnimations";
+import {
+  ANIMATION_PRESET_OPTIONS,
+  buildShoeRoomGradientCss,
+  formatPHP,
+  SHOE_ANGLE_OPTIONS,
+} from "../data/shoeCatalog";
+import type {
+  AngleKey,
+  AnimationPresetType,
+  FeaturedShoe,
+  ShoeAngleSet,
+  ShoeCategory,
+} from "../data/shoeCatalog";
 import type {
   AppUser,
+  CreateShoeInput,
   OrderRecord,
   OrderStatusType,
+  PaymentMethodType,
 } from "../services/api";
+import {
+  extractShoeColorPalette,
+  resolveAssetUrl,
+  useShoeCutoutUrl,
+} from "../utils/useTransparentCutout";
 
 interface AdminDashboardPageProps {
   users: AppUser[];
@@ -36,15 +62,11 @@ interface AdminDashboardPageProps {
     updates: Partial<Pick<AppUser, "username" | "email" | "password" | "role">>
   ) => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
-  onCreateProduct: (data: {
-    name: string;
-    colorwayName: string;
-    category: Exclude<ShoeCategory, "All Shoes">;
-    price: number;
-    stock: number;
-    badge: string;
-    description: string;
-  }) => Promise<void>;
+  onUploadShoeAngles: (
+    files: Partial<Record<AngleKey, File>>
+  ) => Promise<Partial<Record<AngleKey, string>>>;
+  onSeedDemoProducts: () => Promise<void>;
+  onCreateProduct: (data: CreateShoeInput) => Promise<void>;
   onUpdateProduct: (
     shoeId: string,
     updates: Partial<FeaturedShoe>
@@ -59,6 +81,38 @@ interface AdminDashboardPageProps {
 
 type AdminTab = "users" | "orders" | "inventory";
 
+const DEFAULT_SIZE_CHOICES = [
+  "US 6.5",
+  "US 7",
+  "US 7.5",
+  "US 8",
+  "US 8.5",
+  "US 9",
+  "US 9.5",
+  "US 10",
+  "US 10.5",
+  "US 11",
+  "US 12",
+];
+
+function hexToRgbTuple(hex: string): [number, number, number] {
+  const clean = hex.replace("#", "");
+  if (clean.length !== 6) return [52, 56, 72];
+  return [
+    parseInt(clean.slice(0, 2), 16) || 52,
+    parseInt(clean.slice(2, 4), 16) || 56,
+    parseInt(clean.slice(4, 6), 16) || 72,
+  ];
+}
+
+function rgbTupleToHex(rgb: [number, number, number]): string {
+  const h = (n: number) =>
+    Math.max(0, Math.min(255, Math.round(n)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${h(rgb[0])}${h(rgb[1])}${h(rgb[2])}`;
+}
+
 export function AdminDashboardPage({
   users,
   products,
@@ -67,6 +121,8 @@ export function AdminDashboardPage({
   onCreateUser,
   onUpdateUser,
   onDeleteUser,
+  onUploadShoeAngles,
+  onSeedDemoProducts,
   onCreateProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -74,7 +130,17 @@ export function AdminDashboardPage({
   onDeleteOrder,
 }: AdminDashboardPageProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const [activeTab, setActiveTab] = useState<AdminTab>("users");
+  const previewShoeRef = useRef<HTMLImageElement | null>(null);
+  const [activeTab, setActiveTab] = useState<AdminTab>("inventory");
+
+  // Search & Filter states across tabs
+  const [userSearch, setUserSearch] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState<"all" | "customer" | "admin">("all");
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<"All" | OrderStatusType>("All");
+  const [orderPaymentFilter, setOrderPaymentFilter] = useState<"All" | PaymentMethodType>("All");
+  const [invSearch, setInvSearch] = useState("");
+  const [invCategoryFilter, setInvCategoryFilter] = useState<"All" | Exclude<ShoeCategory, "All Shoes">>("All");
 
   // User Edit / Create Modal States
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
@@ -84,17 +150,97 @@ export function AdminDashboardPage({
   const [uPassword, setUPassword] = useState("");
   const [uRole, setURole] = useState<"customer" | "admin">("customer");
 
-  // Product Create / Edit States
+  // Shoe Upload Studio Modal States
   const [isCreatingShoe, setIsCreatingShoe] = useState(false);
   const [editingShoe, setEditingShoe] = useState<FeaturedShoe | null>(null);
   const [sName, setSName] = useState("");
   const [sColorway, setSColorway] = useState("");
   const [sCategory, setSCategory] =
     useState<Exclude<ShoeCategory, "All Shoes">>("Basketball Shoes");
-  const [sPrice, setSPrice] = useState("7895");
-  const [sStock, setSStock] = useState("12");
+  const [sPrice, setSPrice] = useState("6995");
+  const [sStock, setSStock] = useState("15");
   const [sBadge, setSBadge] = useState("New Release");
+  const [sHeroWord, setSHeroWord] = useState("VELOCITY");
+  const [sTagline, setSTagline] = useState("");
   const [sDescription, setSDescription] = useState("");
+  const [sFeaturedInHero, setSFeaturedInHero] = useState(true);
+  const [sPreset, setSPreset] = useState<AnimationPresetType>("studio-float");
+  const [sSensitivity, setSSensitivity] = useState(50);
+  const [sRoomRgb, setSRoomRgb] = useState<[number, number, number]>([52, 56, 72]);
+  const [sAccentHex, setSAccentHex] = useState("#F59E0B");
+  const [sGlowRgb, setSGlowRgb] = useState("245, 158, 11");
+  const [sSizes, setSSizes] = useState<string[]>([
+    "US 7",
+    "US 8",
+    "US 9",
+    "US 10",
+    "US 11",
+  ]);
+  const [sAngles, setSAngles] = useState<Partial<Record<AngleKey, string>>>({});
+  const [pendingFiles, setPendingFiles] = useState<Partial<Record<AngleKey, File>>>({});
+  const [localPreviews, setLocalPreviews] = useState<Partial<Record<AngleKey, string>>>({});
+  const [shoeFormError, setShoeFormError] = useState<string | null>(null);
+  const [isSavingShoe, setIsSavingShoe] = useState(false);
+
+  const previewLateralSrc =
+    localPreviews.lateral || sAngles.lateral || "";
+  const previewCutoutUrl = useShoeCutoutUrl(previewLateralSrc, sSensitivity);
+
+  // KPI computations
+  const kpis = useMemo(() => {
+    const totalRevenue = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const pendingOrders = orders.filter((o) => o.status === "Pending").length;
+    const lowStockShoes = products.filter((p) => p.stock <= 3).length;
+    return {
+      totalRevenue,
+      totalOrders: orders.length,
+      pendingOrders,
+      lowStockShoes,
+      totalUsers: users.length,
+    };
+  }, [orders, products, users]);
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    return users.filter((u) => {
+      if (userRoleFilter !== "all" && u.role !== userRoleFilter) return false;
+      if (!q) return true;
+      return (
+        u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+      );
+    });
+  }, [users, userSearch, userRoleFilter]);
+
+  const filteredOrders = useMemo(() => {
+    const q = orderSearch.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (orderStatusFilter !== "All" && o.status !== orderStatusFilter) return false;
+      if (orderPaymentFilter !== "All" && o.paymentMethod !== orderPaymentFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        o.orderNumber.toLowerCase().includes(q) ||
+        o.username.toLowerCase().includes(q) ||
+        o.userEmail.toLowerCase().includes(q)
+      );
+    });
+  }, [orders, orderSearch, orderStatusFilter, orderPaymentFilter]);
+
+  const filteredProducts = useMemo(() => {
+    const q = invSearch.trim().toLowerCase();
+    return products.filter((p) => {
+      if (invCategoryFilter !== "All" && p.category !== invCategoryFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        p.colorwayName.toLowerCase().includes(q)
+      );
+    });
+  }, [products, invSearch, invCategoryFilter]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -116,7 +262,7 @@ export function AdminDashboardPage({
     setIsCreatingUser(false);
     setUUsername(u.username);
     setUEmail(u.email);
-    setUPassword(u.password);
+    setUPassword("");
     setURole(u.role);
   };
 
@@ -125,19 +271,24 @@ export function AdminDashboardPage({
     setIsCreatingUser(true);
     setUUsername("");
     setUEmail("");
-    setUPassword("sole123");
+    setUPassword("");
     setURole("customer");
   };
 
   const handleSaveUser = async (e: FormEvent) => {
     e.preventDefault();
     if (editingUser) {
-      await onUpdateUser(editingUser._id, {
+      const updates: Partial<
+        Pick<AppUser, "username" | "email" | "password" | "role">
+      > = {
         username: uUsername.trim(),
         email: uEmail.trim().toLowerCase(),
-        password: uPassword,
         role: uRole,
-      });
+      };
+      if (uPassword.trim().length >= 6) {
+        updates.password = uPassword;
+      }
+      await onUpdateUser(editingUser._id, updates);
       setEditingUser(null);
     } else if (isCreatingUser) {
       await onCreateUser({
@@ -150,19 +301,40 @@ export function AdminDashboardPage({
     }
   };
 
+  const resetShoeModalFiles = () => {
+    Object.values(localPreviews).forEach((url) => {
+      if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    });
+    setPendingFiles({});
+    setLocalPreviews({});
+    setShoeFormError(null);
+  };
+
   const openCreateShoeModal = () => {
+    resetShoeModalFiles();
     setEditingShoe(null);
     setIsCreatingShoe(true);
     setSName("");
     setSColorway("");
     setSCategory("Basketball Shoes");
     setSPrice("6995");
-    setSStock("15");
+    setSStock("12");
     setSBadge("New Release");
+    setSHeroWord("VELOCITY");
+    setSTagline("");
     setSDescription("");
+    setSFeaturedInHero(true);
+    setSPreset("studio-float");
+    setSSensitivity(50);
+    setSRoomRgb([52, 56, 72]);
+    setSAccentHex("#F59E0B");
+    setSGlowRgb("245, 158, 11");
+    setSSizes(["US 7", "US 8", "US 9", "US 10", "US 11"]);
+    setSAngles({});
   };
 
   const openEditShoeModal = (shoe: FeaturedShoe) => {
+    resetShoeModalFiles();
     setIsCreatingShoe(false);
     setEditingShoe(shoe);
     setSName(shoe.name);
@@ -171,39 +343,110 @@ export function AdminDashboardPage({
     setSPrice(String(shoe.price));
     setSStock(String(shoe.stock));
     setSBadge(shoe.badge);
-    setSDescription(shoe.description);
+    setSHeroWord(shoe.heroWord || "VELOCITY");
+    setSTagline(shoe.tagline || "");
+    setSDescription(shoe.description || "");
+    setSFeaturedInHero(Boolean(shoe.featuredInHero));
+    setSPreset(shoe.animationPreset ?? "studio-float");
+    setSSensitivity(shoe.cutoutSensitivity ?? 50);
+    setSRoomRgb(shoe.roomRgb?.length === 3 ? shoe.roomRgb : [52, 56, 72]);
+    setSAccentHex(shoe.accentHex || "#F59E0B");
+    setSGlowRgb(shoe.glowRgb || "245, 158, 11");
+    setSSizes(shoe.sizes?.length ? shoe.sizes : ["US 8", "US 9", "US 10"]);
+    setSAngles({ ...shoe.angles });
+  };
+
+  const handleSelectAngleFile = async (angleKey: AngleKey, file: File | null) => {
+    if (!file) return;
+    setShoeFormError(null);
+
+    const previewUrl = URL.createObjectURL(file);
+    setPendingFiles((prev) => ({ ...prev, [angleKey]: file }));
+    setLocalPreviews((prev) => ({ ...prev, [angleKey]: previewUrl }));
+
+    if (angleKey === "lateral") {
+      const palette = await extractShoeColorPalette(previewUrl, sSensitivity);
+      setSRoomRgb(palette.roomRgb);
+      setSAccentHex(palette.accentHex);
+      setSGlowRgb(palette.glowRgb);
+    }
+  };
+
+  const handleReExtractPalette = async () => {
+    if (!previewLateralSrc) return;
+    const palette = await extractShoeColorPalette(previewLateralSrc, sSensitivity);
+    setSRoomRgb(palette.roomRgb);
+    setSAccentHex(palette.accentHex);
+    setSGlowRgb(palette.glowRgb);
+  };
+
+  const toggleSizeOption = (size: string) => {
+    setSSizes((prev) =>
+      prev.includes(size) ? prev.filter((s) => s !== size) : [...prev, size]
+    );
   };
 
   const handleSaveShoe = async (e: FormEvent) => {
     e.preventDefault();
-    if (editingShoe) {
-      await onUpdateProduct(editingShoe.id, {
+    setShoeFormError(null);
+
+    const hasLateral = Boolean(pendingFiles.lateral || sAngles.lateral);
+    if (!hasLateral) {
+      setShoeFormError("Lateral Profile photo is required.");
+      return;
+    }
+
+    setIsSavingShoe(true);
+    try {
+      const uploadedUrls = await onUploadShoeAngles(pendingFiles);
+      const mergedAngles: ShoeAngleSet = {
+        lateral: uploadedUrls.lateral ?? sAngles.lateral ?? "",
+        pairAngle: uploadedUrls.pairAngle ?? sAngles.pairAngle ?? "",
+        medial: uploadedUrls.medial ?? sAngles.medial ?? "",
+        topDown: uploadedUrls.topDown ?? sAngles.topDown ?? "",
+        outsole: uploadedUrls.outsole ?? sAngles.outsole ?? "",
+        heel: uploadedUrls.heel ?? sAngles.heel ?? "",
+      };
+
+      const payload: CreateShoeInput = {
         name: sName.trim(),
         colorwayName: sColorway.trim(),
         category: sCategory,
         price: Number(sPrice),
         stock: Number(sStock),
-        badge: sBadge.trim(),
+        badge: sBadge.trim() || "New Release",
+        heroWord: sHeroWord.trim().toUpperCase() || "VELOCITY",
+        tagline: sTagline.trim(),
         description: sDescription.trim(),
-      });
-      setEditingShoe(null);
-    } else if (isCreatingShoe) {
-      await onCreateProduct({
-        name: sName.trim(),
-        colorwayName: sColorway.trim(),
-        category: sCategory,
-        price: Number(sPrice),
-        stock: Number(sStock),
-        badge: sBadge.trim(),
-        description: sDescription.trim(),
-      });
-      setIsCreatingShoe(false);
+        featuredInHero: sFeaturedInHero,
+        animationPreset: sPreset,
+        cutoutSensitivity: sSensitivity,
+        roomRgb: sRoomRgb,
+        accentHex: sAccentHex,
+        glowRgb: sGlowRgb,
+        sizes: sSizes.length > 0 ? sSizes : ["US 8", "US 9", "US 10"],
+        angles: mergedAngles,
+      };
+
+      if (editingShoe) {
+        await onUpdateProduct(editingShoe.id, payload);
+        setEditingShoe(null);
+      } else {
+        await onCreateProduct(payload);
+        setIsCreatingShoe(false);
+      }
+      resetShoeModalFiles();
+    } catch (err) {
+      setShoeFormError(
+        err instanceof Error ? err.message : "Failed to save shoe."
+      );
+    } finally {
+      setIsSavingShoe(false);
     }
   };
 
   return (
     <section className="relative min-h-screen overflow-hidden bg-[#070709] pt-28 pb-20 text-white">
-      {/* Ambient Sporty Arena Glow */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -213,8 +456,8 @@ export function AdminDashboardPage({
       </div>
 
       <div className="relative z-10 mx-auto max-w-7xl px-6 md:px-10">
-        {/* Header & Navigation */}
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        {/* Header & Tab Switchers (All verbose helper subtitles removed) */}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <button
               type="button"
@@ -227,25 +470,20 @@ export function AdminDashboardPage({
             <h1 className="font-sport text-3xl tracking-wide text-white uppercase italic sm:text-4xl">
               SOLE PURPOSE <span className="text-amber-300">ADMIN PANEL</span>
             </h1>
-            <p className="mt-1 text-xs text-zinc-400">
-              MERN Stack Database CRUD Management — User Profiles, Orders &amp;
-              Buyers Log, and Shoe Stock Inventory.
-            </p>
           </div>
 
-          {/* 3 Tab Switchers */}
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-black/50 p-1.5">
             <button
               type="button"
-              onClick={() => setActiveTab("users")}
+              onClick={() => setActiveTab("inventory")}
               className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold tracking-wide uppercase transition ${
-                activeTab === "users"
+                activeTab === "inventory"
                   ? "bg-amber-400 text-black shadow"
                   : "text-zinc-300 hover:text-white"
               }`}
             >
-              <Users className="h-4 w-4" />
-              <span>1. User Profiles ({users.length})</span>
+              <Boxes className="h-4 w-4" />
+              <span>Shoe Inventory ({products.length})</span>
             </button>
 
             <button
@@ -258,21 +496,67 @@ export function AdminDashboardPage({
               }`}
             >
               <Package className="h-4 w-4" />
-              <span>2. Orders &amp; Buyers ({orders.length})</span>
+              <span>Orders ({orders.length})</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveTab("inventory")}
+              onClick={() => setActiveTab("users")}
               className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold tracking-wide uppercase transition ${
-                activeTab === "inventory"
+                activeTab === "users"
                   ? "bg-amber-400 text-black shadow"
                   : "text-zinc-300 hover:text-white"
               }`}
             >
-              <Boxes className="h-4 w-4" />
-              <span>3. Shoe Stock Inventory ({products.length})</span>
+              <Users className="h-4 w-4" />
+              <span>Users ({users.length})</span>
             </button>
+          </div>
+        </div>
+
+        {/* 4 Executive KPI Cards */}
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="rounded-2xl border border-white/15 bg-white/[0.04] p-4 backdrop-blur-md">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span>Total Revenue</span>
+              <DollarSign className="h-4 w-4 text-emerald-400" />
+            </div>
+            <p className="font-mono-tabular mt-1.5 text-2xl font-bold text-white">
+              {formatPHP(kpis.totalRevenue)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/15 bg-white/[0.04] p-4 backdrop-blur-md">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span>Total Orders</span>
+              <Package className="h-4 w-4 text-amber-300" />
+            </div>
+            <p className="font-mono-tabular mt-1.5 text-2xl font-bold text-white">
+              {kpis.totalOrders}{" "}
+              <span className="text-xs font-normal text-zinc-400">
+                ({kpis.pendingOrders} pending)
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/15 bg-white/[0.04] p-4 backdrop-blur-md">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span>Low-Stock Alerts</span>
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+            </div>
+            <p className="font-mono-tabular mt-1.5 text-2xl font-bold text-amber-300">
+              {kpis.lowStockShoes}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/15 bg-white/[0.04] p-4 backdrop-blur-md">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span>Registered Users</span>
+              <Users className="h-4 w-4 text-blue-400" />
+            </div>
+            <p className="font-mono-tabular mt-1.5 text-2xl font-bold text-white">
+              {kpis.totalUsers}
+            </p>
           </div>
         </div>
 
@@ -281,27 +565,46 @@ export function AdminDashboardPage({
           ref={panelRef}
           className="rounded-3xl border border-white/15 bg-white/[0.04] p-6 backdrop-blur-xl sm:p-8"
         >
-          {/* TAB 1: USER PROFILES CRUD */}
+          {/* TAB 1: USER PROFILES */}
           {activeTab === "users" && (
             <div>
               <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <h2 className="font-sport text-2xl tracking-wide text-white uppercase italic">
-                    USER PROFILES CRUD
-                  </h2>
-                  <p className="text-xs text-zinc-400">
-                    Inspect user accounts, change their username, email,
-                    password, or role, or add/delete users.
-                  </p>
+                <h2 className="font-sport text-2xl tracking-wide text-white uppercase italic">
+                  USER PROFILES
+                </h2>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Search username or email..."
+                      className="rounded-full border border-white/15 bg-black/50 py-2 pr-3 pl-8 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+                  <select
+                    value={userRoleFilter}
+                    onChange={(e) =>
+                      setUserRoleFilter(
+                        e.target.value as "all" | "customer" | "admin"
+                      )
+                    }
+                    className="rounded-full border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                  >
+                    <option value="all">Role: All</option>
+                    <option value="customer">Customer</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={openCreateUserModal}
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs font-bold tracking-wider text-black uppercase transition hover:bg-amber-300"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Add User</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={openCreateUserModal}
-                  className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs font-bold tracking-wider text-black uppercase transition hover:bg-amber-300"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Add User (Create)</span>
-                </button>
               </div>
 
               <div className="overflow-x-auto">
@@ -310,21 +613,23 @@ export function AdminDashboardPage({
                     <tr>
                       <th className="py-3 pr-4">Username</th>
                       <th className="py-3 pr-4">Email Address</th>
-                      <th className="py-3 pr-4">Password</th>
+                      <th className="py-3 pr-4">Security</th>
                       <th className="py-3 pr-4">Role</th>
-                      <th className="py-3 pr-4">Liked Shoes</th>
-                      <th className="py-3 text-right">CRUD Actions</th>
+                      <th className="py-3 pr-4">Liked</th>
+                      <th className="py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
-                    {users.map((u) => (
+                    {filteredUsers.map((u) => (
                       <tr key={u._id} className="hover:bg-white/[0.02]">
                         <td className="py-4 pr-4 font-semibold text-white">
                           @{u.username}
                         </td>
                         <td className="py-4 pr-4 text-zinc-300">{u.email}</td>
-                        <td className="font-mono-tabular py-4 pr-4 text-amber-300">
-                          {u.password}
+                        <td className="py-4 pr-4">
+                          <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+                            Protected (bcrypt)
+                          </span>
                         </td>
                         <td className="py-4 pr-4">
                           <span
@@ -338,7 +643,7 @@ export function AdminDashboardPage({
                           </span>
                         </td>
                         <td className="font-mono-tabular py-4 pr-4 text-zinc-400">
-                          {u.likedShoeIds?.length ?? 0} saved
+                          {u.likedShoeIds?.length ?? 0}
                         </td>
                         <td className="py-4 text-right">
                           <div className="inline-flex items-center gap-2">
@@ -368,27 +673,63 @@ export function AdminDashboardPage({
             </div>
           )}
 
-          {/* TAB 2: ORDERS & BUYERS LOG CRUD */}
+          {/* TAB 2: ORDERS & BUYERS */}
           {activeTab === "orders" && (
             <div>
-              <div className="mb-6">
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <h2 className="font-sport text-2xl tracking-wide text-white uppercase italic">
-                  CUSTOMER PURCHASES &amp; ORDERS LOG
+                  ORDERS &amp; PURCHASES
                 </h2>
-                <p className="text-xs text-zinc-400">
-                  See who bought which shoes, payment method (COD, E-Wallet,
-                  Debit/Credit Card), delivery address, and update delivery
-                  status.
-                </p>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={orderSearch}
+                      onChange={(e) => setOrderSearch(e.target.value)}
+                      placeholder="Order ID or buyer..."
+                      className="rounded-full border border-white/15 bg-black/50 py-2 pr-3 pl-8 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+                  <select
+                    value={orderStatusFilter}
+                    onChange={(e) =>
+                      setOrderStatusFilter(
+                        e.target.value as "All" | OrderStatusType
+                      )
+                    }
+                    className="rounded-full border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                  >
+                    <option value="All">Status: All</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Shipped">Shipped</option>
+                    <option value="Delivered">Delivered</option>
+                  </select>
+                  <select
+                    value={orderPaymentFilter}
+                    onChange={(e) =>
+                      setOrderPaymentFilter(
+                        e.target.value as "All" | PaymentMethodType
+                      )
+                    }
+                    className="rounded-full border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                  >
+                    <option value="All">Payment: All</option>
+                    <option value="COD">COD</option>
+                    <option value="E-Wallet">E-Wallet</option>
+                    <option value="Debit/Credit Card">Debit/Credit Card</option>
+                  </select>
+                </div>
               </div>
 
-              {orders.length === 0 ? (
+              {filteredOrders.length === 0 ? (
                 <p className="py-10 text-center text-sm text-zinc-400">
-                  No orders recorded yet.
+                  No matching orders recorded yet.
                 </p>
               ) : (
                 <div className="space-y-4">
-                  {orders.map((ord) => (
+                  {filteredOrders.map((ord) => (
                     <div
                       key={ord._id}
                       className="rounded-2xl border border-white/15 bg-black/45 p-5"
@@ -450,7 +791,7 @@ export function AdminDashboardPage({
                             >
                               <div className="flex items-center gap-2.5">
                                 <img
-                                  src={item.imageUrl}
+                                  src={resolveAssetUrl(item.imageUrl)}
                                   alt={item.shoeName}
                                   className="h-10 w-10 rounded-lg bg-[#F5F5F5] object-contain p-1"
                                 />
@@ -459,8 +800,7 @@ export function AdminDashboardPage({
                                     {item.shoeName}
                                   </p>
                                   <p className="text-zinc-400">
-                                    Size: {item.size} · Quantity:{" "}
-                                    {item.quantity}
+                                    Size: {item.size} · Quantity: {item.quantity}
                                   </p>
                                 </div>
                               </div>
@@ -503,129 +843,188 @@ export function AdminDashboardPage({
             </div>
           )}
 
-          {/* TAB 3: SHOE STOCK & CATALOG INVENTORY CRUD */}
+          {/* TAB 3: SHOE STOCK & UPLOAD STUDIO */}
           {activeTab === "inventory" && (
             <div>
               <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <h2 className="font-sport text-2xl tracking-wide text-white uppercase italic">
-                    SHOE STOCK &amp; CATALOG INVENTORY CRUD
-                  </h2>
-                  <p className="text-xs text-zinc-400">
-                    Monitor how many stocks are left per shoe, adjust stock
-                    counts or prices, or add/delete shoes across categories.
+                <h2 className="font-sport text-2xl tracking-wide text-white uppercase italic">
+                  SHOE STOCK &amp; CATALOG
+                </h2>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={invSearch}
+                      onChange={(e) => setInvSearch(e.target.value)}
+                      placeholder="Search shoe or SKU..."
+                      className="rounded-full border border-white/15 bg-black/50 py-2 pr-3 pl-8 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+                  <select
+                    value={invCategoryFilter}
+                    onChange={(e) =>
+                      setInvCategoryFilter(
+                        e.target.value as
+                          | "All"
+                          | Exclude<ShoeCategory, "All Shoes">
+                      )
+                    }
+                    className="rounded-full border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                  >
+                    <option value="All">All Categories</option>
+                    <option value="Basketball Shoes">Basketball Shoes</option>
+                    <option value="Running Shoes">Running Shoes</option>
+                    <option value="Sandals & Slides">Sandals &amp; Slides</option>
+                    <option value="Lifestyle">Lifestyle</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => void onSeedDemoProducts()}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:border-amber-400 hover:text-amber-300"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>Load Starter Demo Shoes</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={openCreateShoeModal}
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs font-bold tracking-wider text-black uppercase transition hover:bg-amber-300"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Add Shoe</span>
+                  </button>
+                </div>
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-black/35 p-10 text-center">
+                  <p className="text-sm font-semibold text-white">
+                    No shoes in inventory yet.
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Click &ldquo;Add Shoe&rdquo; to upload Nike studio photos
+                    with automatic background removal, or load starter demo
+                    shoes.
                   </p>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={openCreateShoeModal}
-                  className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs font-bold tracking-wider text-black uppercase transition hover:bg-amber-300"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Add New Shoe (Create)</span>
-                </button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b border-white/15 text-zinc-400 uppercase">
-                    <tr>
-                      <th className="py-3 pr-4">Shoe</th>
-                      <th className="py-3 pr-4">Category</th>
-                      <th className="py-3 pr-4">Price (PHP)</th>
-                      <th className="py-3 pr-4">Remaining Stock</th>
-                      <th className="py-3 text-right">CRUD Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/10">
-                    {products.map((shoe) => (
-                      <tr key={shoe.id} className="hover:bg-white/[0.02]">
-                        <td className="py-3.5 pr-4">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={shoe.angles.lateral}
-                              alt={shoe.name}
-                              className="h-12 w-12 rounded-xl bg-[#F5F5F5] object-contain p-1"
-                            />
-                            <div>
-                              <p className="font-semibold text-white">
-                                {shoe.name}
-                              </p>
-                              <p className="text-[11px] text-zinc-400">
-                                {shoe.sku} · {shoe.colorwayName}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3.5 pr-4 text-zinc-300">
-                          {shoe.category}
-                        </td>
-                        <td className="font-mono-tabular py-3.5 pr-4 font-bold text-white">
-                          {formatPHP(shoe.price)}
-                        </td>
-                        <td className="py-3.5 pr-4">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onUpdateProduct(shoe.id, {
-                                  stock: Math.max(0, shoe.stock - 1),
-                                })
-                              }
-                              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-white/5 font-bold text-white hover:bg-white/20"
-                            >
-                              -
-                            </button>
-                            <span
-                              className={`font-mono-tabular min-w-20 rounded-full px-3 py-1 text-center text-xs font-bold ${
-                                shoe.stock <= 0
-                                  ? "bg-red-500/20 text-red-300"
-                                  : shoe.stock <= 3
-                                    ? "bg-amber-500/20 text-amber-300"
-                                    : "bg-emerald-500/20 text-emerald-300"
-                              }`}
-                            >
-                              {shoe.stock} left
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onUpdateProduct(shoe.id, {
-                                  stock: shoe.stock + 1,
-                                })
-                              }
-                              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-white/5 font-bold text-white hover:bg-white/20"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </td>
-                        <td className="py-3.5 text-right">
-                          <div className="inline-flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openEditShoeModal(shoe)}
-                              className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:border-amber-400 hover:bg-amber-400 hover:text-black"
-                            >
-                              <Edit3 className="h-3.5 w-3.5" />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onDeleteProduct(shoe.id)}
-                              className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-300 transition hover:bg-red-500 hover:text-white"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              <span>Delete</span>
-                            </button>
-                          </div>
-                        </td>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-white/15 text-zinc-400 uppercase">
+                      <tr>
+                        <th className="py-3 pr-4">Shoe (Lateral Profile)</th>
+                        <th className="py-3 pr-4">Category</th>
+                        <th className="py-3 pr-4">Hero / Motion</th>
+                        <th className="py-3 pr-4">Price</th>
+                        <th className="py-3 pr-4">Stock</th>
+                        <th className="py-3 text-right">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {filteredProducts.map((shoe) => (
+                        <tr key={shoe.id} className="hover:bg-white/[0.02]">
+                          <td className="py-3.5 pr-4">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={resolveAssetUrl(shoe.angles.lateral)}
+                                alt={shoe.name}
+                                className="h-12 w-12 rounded-xl bg-[#F5F5F5] object-contain p-1"
+                              />
+                              <div>
+                                <p className="font-semibold text-white">
+                                  {shoe.name}
+                                </p>
+                                <p className="text-[11px] text-zinc-400">
+                                  {shoe.sku} · {shoe.colorwayName}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3.5 pr-4 text-zinc-300">
+                            {shoe.category}
+                          </td>
+                          <td className="py-3.5 pr-4">
+                            <div className="flex flex-col gap-1">
+                              {shoe.featuredInHero && (
+                                <span className="w-fit rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 uppercase">
+                                  In Hero
+                                </span>
+                              )}
+                              <span className="text-[11px] text-zinc-400">
+                                {shoe.animationPreset ?? "studio-float"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="font-mono-tabular py-3.5 pr-4 font-bold text-white">
+                            {formatPHP(shoe.price)}
+                          </td>
+                          <td className="py-3.5 pr-4">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateProduct(shoe.id, {
+                                    stock: Math.max(0, shoe.stock - 1),
+                                  })
+                                }
+                                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-white/5 font-bold text-white hover:bg-white/20"
+                              >
+                                -
+                              </button>
+                              <span
+                                className={`font-mono-tabular min-w-20 rounded-full px-3 py-1 text-center text-xs font-bold ${
+                                  shoe.stock <= 0
+                                    ? "bg-red-500/20 text-red-300"
+                                    : shoe.stock <= 3
+                                      ? "bg-amber-500/20 text-amber-300"
+                                      : "bg-emerald-500/20 text-emerald-300"
+                                }`}
+                              >
+                                {shoe.stock} left
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateProduct(shoe.id, {
+                                    stock: shoe.stock + 1,
+                                  })
+                                }
+                                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-white/5 font-bold text-white hover:bg-white/20"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-3.5 text-right">
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditShoeModal(shoe)}
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:border-amber-400 hover:bg-amber-400 hover:text-black"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteProduct(shoe.id)}
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-300 transition hover:bg-red-500 hover:text-white"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -688,13 +1087,19 @@ export function AdminDashboardPage({
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-300">
-                  Password
+                  {editingUser
+                    ? "Reset Password (optional, min 6 chars)"
+                    : "Password (min 6 chars)"}
                 </label>
                 <input
-                  type="text"
-                  required
+                  type="password"
+                  required={isCreatingUser}
+                  minLength={isCreatingUser ? 6 : undefined}
                   value={uPassword}
                   onChange={(e) => setUPassword(e.target.value)}
+                  placeholder={
+                    editingUser ? "Leave blank to keep existing hash" : ""
+                  }
                   className="mt-1.5 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2.5 text-sm text-white focus:outline-none"
                 />
               </div>
@@ -719,25 +1124,25 @@ export function AdminDashboardPage({
                 className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-amber-400 py-3 text-xs font-bold tracking-widest text-black uppercase hover:bg-amber-300"
               >
                 <Check className="h-4 w-4" />
-                <span>Save User Profile (CRUD)</span>
+                <span>Save User Profile</span>
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* SHOE CREATE / EDIT MODAL */}
+      {/* SHOE UPLOAD STUDIO MODAL (White-BG Removal + Auto Color + Anime.js Presets) */}
       {(editingShoe || isCreatingShoe) && (
         <div
           onClick={() => {
             setEditingShoe(null);
             setIsCreatingShoe(false);
           }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-md rounded-3xl border border-white/15 bg-[#101118] p-7 text-white shadow-2xl"
+            className="relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-white/15 bg-[#101118] p-6 text-white shadow-2xl sm:p-8"
           >
             <button
               type="button"
@@ -745,125 +1150,380 @@ export function AdminDashboardPage({
                 setEditingShoe(null);
                 setIsCreatingShoe(false);
               }}
-              className="absolute top-4 right-4 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white/10 text-zinc-300 hover:bg-white/20"
+              className="sticky top-0 float-right flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white/10 text-zinc-300 hover:bg-white/20"
             >
               <X className="h-4 w-4" />
             </button>
 
-            <h3 className="font-sport text-xl uppercase italic">
-              {editingShoe ? `EDIT SHOE · ${editingShoe.name}` : "ADD NEW SHOE"}
+            <h3 className="font-sport text-2xl uppercase italic">
+              {editingShoe
+                ? `EDIT SHOE · ${editingShoe.name}`
+                : "ADD SHOE & 3D STUDIO"}
             </h3>
 
-            <form onSubmit={handleSaveShoe} className="mt-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-zinc-300">
-                  Shoe Model Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={sName}
-                  onChange={(e) => setSName(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
-                />
+            {shoeFormError && (
+              <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/15 px-3.5 py-2.5 text-xs text-red-200">
+                {shoeFormError}
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-300">
-                  Colorway Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={sColorway}
-                  onChange={(e) => setSColorway(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
-                />
-              </div>
+            <form
+              onSubmit={handleSaveShoe}
+              className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-12"
+            >
+              {/* LEFT: Live 3D Cutout, Palette & Anime.js Preview */}
+              <div className="space-y-4 lg:col-span-5">
+                <div
+                  className="relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-2xl border border-white/15 p-6"
+                  style={{ backgroundImage: buildShoeRoomGradientCss(sRoomRgb) }}
+                >
+                  {previewCutoutUrl ? (
+                    <>
+                      <div className="pointer-events-none absolute bottom-10 h-5 w-3/4 rounded-full bg-black/45 blur-md" />
+                      <img
+                        ref={previewShoeRef}
+                        src={previewCutoutUrl}
+                        alt="Live Cutout Preview"
+                        className="relative z-10 max-h-60 w-full object-contain drop-shadow-[0_22px_26px_rgba(0,0,0,0.55)]"
+                      />
+                    </>
+                  ) : (
+                    <div className="text-center text-xs text-zinc-300">
+                      <Upload className="mx-auto mb-2 h-8 w-8 opacity-75" />
+                      Upload a Lateral Profile Nike photo to preview auto
+                      white-bg removal &amp; room color matching.
+                    </div>
+                  )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300">
-                    Category
-                  </label>
-                  <select
-                    value={sCategory}
-                    onChange={(e) =>
-                      setSCategory(
-                        e.target.value as Exclude<ShoeCategory, "All Shoes">
-                      )
-                    }
-                    className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white focus:outline-none"
-                  >
-                    <option value="Basketball Shoes">Basketball Shoes</option>
-                    <option value="Running Shoes">Running Shoes</option>
-                    <option value="Sandals & Slides">Sandals &amp; Slides</option>
-                    <option value="Lifestyle">Lifestyle</option>
-                  </select>
+                  {previewCutoutUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        playShoePresetAnimation(previewShoeRef.current, sPreset)
+                      }
+                      className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white/90 px-4 py-1.5 text-[11px] font-bold text-black shadow transition hover:bg-amber-300"
+                    >
+                      <Play className="h-3 w-3" />
+                      <span>Preview 3D Motion</span>
+                    </button>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300">
-                    Badge
-                  </label>
+                {/* White-BG Sensitivity Slider */}
+                <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-zinc-200">
+                      White-BG Removal Sensitivity
+                    </span>
+                    <span className="font-mono-tabular text-amber-300">
+                      {sSensitivity}%
+                    </span>
+                  </div>
                   <input
-                    type="text"
-                    required
-                    value={sBadge}
-                    onChange={(e) => setSBadge(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300">
-                    Price (PHP ₱)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={100}
-                    value={sPrice}
-                    onChange={(e) => setSPrice(e.target.value)}
-                    className="font-mono-tabular mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300">
-                    Stocks Available
-                  </label>
-                  <input
-                    type="number"
-                    required
+                    type="range"
                     min={0}
-                    value={sStock}
-                    onChange={(e) => setSStock(e.target.value)}
-                    className="font-mono-tabular mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
+                    max={100}
+                    value={sSensitivity}
+                    onChange={(e) => setSSensitivity(Number(e.target.value))}
+                    className="mt-2 w-full accent-amber-400"
                   />
+                  <p className="mt-1 text-[11px] text-zinc-400">
+                    Lower for white-upper Nike shoes; higher to erase darker
+                    floor shadows.
+                  </p>
+                </div>
+
+                {/* Auto-Extracted Color Palette + Override */}
+                <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-semibold text-zinc-200">
+                      <Palette className="h-3.5 w-3.5 text-amber-300" />
+                      Studio Room Color
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!previewLateralSrc}
+                      onClick={() => void handleReExtractPalette()}
+                      className="cursor-pointer text-[11px] font-semibold text-amber-300 hover:underline disabled:opacity-40"
+                    >
+                      Re-Extract From Photo
+                    </button>
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-3">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={rgbTupleToHex(sRoomRgb)}
+                        onChange={(e) =>
+                          setSRoomRgb(hexToRgbTuple(e.target.value))
+                        }
+                        className="h-8 w-8 cursor-pointer rounded border border-white/20 bg-transparent"
+                      />
+                      <span className="text-[11px] text-zinc-300">Room</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={sAccentHex}
+                        onChange={(e) => {
+                          const hex = e.target.value;
+                          const [r, g, b] = hexToRgbTuple(hex);
+                          setSAccentHex(hex);
+                          setSGlowRgb(`${r}, ${g}, ${b}`);
+                        }}
+                        className="h-8 w-8 cursor-pointer rounded border border-white/20 bg-transparent"
+                      />
+                      <span className="text-[11px] text-zinc-300">Accent</span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-300">
-                  Description
-                </label>
-                <textarea
-                  rows={2}
-                  value={sDescription}
-                  onChange={(e) => setSDescription(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-xs text-white focus:outline-none"
-                />
-              </div>
+              {/* RIGHT: Shoe Details, Animation Controls & Multi-Angle Uploads */}
+              <div className="space-y-3.5 text-xs lg:col-span-7">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Shoe Model Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={sName}
+                      onChange={(e) => setSName(e.target.value)}
+                      placeholder="e.g. Nike Dunk Low Retro"
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Colorway Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={sColorway}
+                      onChange={(e) => setSColorway(e.target.value)}
+                      placeholder="e.g. White / Black Panda"
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
 
-              <button
-                type="submit"
-                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-amber-400 py-3 text-xs font-bold tracking-widest text-black uppercase hover:bg-amber-300"
-              >
-                <Check className="h-4 w-4" />
-                <span>Save Shoe Inventory (CRUD)</span>
-              </button>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="col-span-2">
+                    <label className="block font-medium text-zinc-300">
+                      Category
+                    </label>
+                    <select
+                      value={sCategory}
+                      onChange={(e) =>
+                        setSCategory(
+                          e.target.value as Exclude<ShoeCategory, "All Shoes">
+                        )
+                      }
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white focus:outline-none"
+                    >
+                      <option value="Basketball Shoes">Basketball Shoes</option>
+                      <option value="Running Shoes">Running Shoes</option>
+                      <option value="Sandals & Slides">
+                        Sandals &amp; Slides
+                      </option>
+                      <option value="Lifestyle">Lifestyle</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Price (₱) *
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={100}
+                      value={sPrice}
+                      onChange={(e) => setSPrice(e.target.value)}
+                      className="font-mono-tabular mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Stock *
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      value={sStock}
+                      onChange={(e) => setSStock(e.target.value)}
+                      className="font-mono-tabular mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Badge
+                    </label>
+                    <input
+                      type="text"
+                      value={sBadge}
+                      onChange={(e) => setSBadge(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Anime.js Preset
+                    </label>
+                    <select
+                      value={sPreset}
+                      onChange={(e) =>
+                        setSPreset(e.target.value as AnimationPresetType)
+                      }
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white focus:outline-none"
+                    >
+                      {ANIMATION_PRESET_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-medium text-zinc-300">
+                      Hero Display Word
+                    </label>
+                    <input
+                      type="text"
+                      value={sHeroWord}
+                      onChange={(e) => setSHeroWord(e.target.value)}
+                      placeholder="VELOCITY"
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3 py-2 text-sm text-white uppercase focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-white/15 bg-black/40 px-3.5 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={sFeaturedInHero}
+                    onChange={(e) => setSFeaturedInHero(e.target.checked)}
+                    className="accent-amber-400"
+                  />
+                  <span className="font-semibold text-white">
+                    Feature in Home 3D Hero Carousel
+                  </span>
+                </label>
+
+                <div>
+                  <label className="block font-medium text-zinc-300">
+                    Available US Sizes
+                  </label>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {DEFAULT_SIZE_CHOICES.map((sz) => {
+                      const active = sSizes.includes(sz);
+                      return (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => toggleSizeOption(sz)}
+                          className={`font-mono-tabular cursor-pointer rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                            active
+                              ? "border-amber-400 bg-amber-400 text-black"
+                              : "border-white/15 bg-black/40 text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          {sz}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Multi-Angle Upload Grid (Lateral required, others optional) */}
+                <div className="rounded-2xl border border-white/15 bg-black/40 p-3.5">
+                  <p className="mb-2.5 font-semibold text-white">
+                    Shoe Angle Photos (Lateral Profile shown in Shop; all
+                    uploaded angles shown in Detail View)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                    {SHOE_ANGLE_OPTIONS.map((opt) => {
+                      const isReq = opt.key === "lateral";
+                      const preview =
+                        localPreviews[opt.key] ||
+                        (sAngles[opt.key]
+                          ? resolveAssetUrl(sAngles[opt.key]!)
+                          : "");
+                      return (
+                        <label
+                          key={opt.key}
+                          className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed p-2.5 text-center transition ${
+                            preview
+                              ? "border-emerald-400/50 bg-emerald-500/10"
+                              : isReq
+                                ? "border-amber-400/60 bg-amber-400/5 hover:border-amber-300"
+                                : "border-white/20 bg-white/[0.02] hover:border-white/40"
+                          }`}
+                        >
+                          <input
+                            type="file"
+                            accept=".avif,.png,.jpg,.jpeg,.webp,image/avif,image/png,image/jpeg,image/webp"
+                            className="hidden"
+                            onChange={(e) =>
+                              void handleSelectAngleFile(
+                                opt.key,
+                                e.target.files?.[0] ?? null
+                              )
+                            }
+                          />
+                          {preview ? (
+                            <img
+                              src={preview}
+                              alt={opt.label}
+                              className="h-12 w-full rounded bg-[#F5F5F5] object-contain p-1"
+                            />
+                          ) : (
+                            <Upload className="h-4 w-4 text-zinc-400" />
+                          )}
+                          <span className="mt-1.5 text-[11px] font-semibold text-white">
+                            {opt.label} {isReq ? "*" : ""}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-zinc-300">
+                    Description
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={sDescription}
+                    onChange={(e) => setSDescription(e.target.value)}
+                    placeholder="Cushioning, outsole traction, fit notes..."
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-black/50 px-3.5 py-2 text-xs text-white focus:outline-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSavingShoe}
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-amber-400 py-3.5 text-xs font-bold tracking-widest text-black uppercase hover:bg-amber-300 disabled:opacity-50"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>
+                    {isSavingShoe
+                      ? "Uploading & Saving..."
+                      : editingShoe
+                        ? "Update Shoe"
+                        : "Save Shoe to Catalog"}
+                  </span>
+                </button>
+              </div>
             </form>
           </div>
         </div>

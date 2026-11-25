@@ -1,6 +1,7 @@
-import { ShoppingBasket, Trash2, X } from "lucide-react";
+import { Minus, Plus, ShoppingBasket, Trash2, X } from "lucide-react";
 import { formatPHP } from "../data/shoeCatalog";
 import type { FeaturedShoe } from "../data/shoeCatalog";
+import { resolveAssetUrl } from "../utils/useTransparentCutout";
 
 export interface BasketItem {
   shoe: FeaturedShoe;
@@ -12,6 +13,7 @@ interface BasketDrawerProps {
   isOpen: boolean;
   items: BasketItem[];
   onClose: () => void;
+  onUpdateQuantity: (shoeId: string, size: string, nextQty: number) => void;
   onRemoveItem: (shoeId: string, size: string) => void;
   onProceedToCheckout: () => void;
 }
@@ -20,6 +22,7 @@ export function BasketDrawer({
   isOpen,
   items,
   onClose,
+  onUpdateQuantity,
   onRemoveItem,
   onProceedToCheckout,
 }: BasketDrawerProps) {
@@ -63,8 +66,8 @@ export function BasketDrawer({
                 Your basket is currently empty.
               </p>
               <p className="mt-1 text-xs text-zinc-500">
-                Sign in and add any shoe from Featured Court Releases or the
-                Product Detail page to checkout.
+                Click any shoe in the catalog to inspect angles, pick your size,
+                and add it to your basket.
               </p>
             </div>
           ) : (
@@ -75,7 +78,7 @@ export function BasketDrawer({
                   className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3"
                 >
                   <img
-                    src={item.shoe.angles.pairAngle}
+                    src={resolveAssetUrl(item.shoe.angles.lateral)}
                     alt={item.shoe.name}
                     className="h-16 w-16 rounded-xl bg-[#F5F5F5] object-contain p-1"
                   />
@@ -83,12 +86,46 @@ export function BasketDrawer({
                     <p className="truncate text-sm font-semibold text-white">
                       {item.shoe.name}
                     </p>
-                    <p className="text-xs text-zinc-400">
-                      Size: {item.size} · Qty: {item.quantity}
-                    </p>
-                    <p className="font-mono-tabular mt-1 text-xs font-bold text-amber-300">
-                      {formatPHP(item.shoe.price * item.quantity)}
-                    </p>
+                    <p className="text-xs text-zinc-400">Size: {item.size}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="inline-flex items-center rounded-lg border border-white/15 bg-black/40">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateQuantity(
+                              item.shoe.id,
+                              item.size,
+                              item.quantity - 1
+                            )
+                          }
+                          aria-label="Decrease quantity"
+                          className="cursor-pointer px-2 py-1 text-zinc-300 hover:text-white"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="font-mono-tabular min-w-[24px] text-center text-xs font-bold text-white">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={item.quantity >= item.shoe.stock}
+                          onClick={() =>
+                            onUpdateQuantity(
+                              item.shoe.id,
+                              item.size,
+                              item.quantity + 1
+                            )
+                          }
+                          aria-label="Increase quantity"
+                          className="cursor-pointer px-2 py-1 text-zinc-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <span className="font-mono-tabular text-xs font-bold text-amber-300">
+                        {formatPHP(item.shoe.price * item.quantity)}
+                      </span>
+                    </div>
                   </div>
                   <button
                     type="button"
