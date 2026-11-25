@@ -1,20 +1,9 @@
-import mongoose, { Schema, type Document } from "mongoose";
+import mongoose, { Schema, type Document, type Types } from "mongoose";
 
 export type AnimationPresetType =
   | "studio-float"
   | "court-bounce"
   | "velocity-sweep";
-
-export interface IProductReview {
-  id: string;
-  userId: string;
-  author: string;
-  location: string;
-  rating: number;
-  title: string;
-  comment: string;
-  date: string;
-}
 
 export interface IProduct extends Document {
   id: string;
@@ -39,6 +28,7 @@ export interface IProduct extends Document {
   animationPreset: AnimationPresetType;
   cutoutSensitivity: number;
   sizes: string[];
+  createdBy?: Types.ObjectId | null;
   angles: {
     lateral: string;
     outsole: string;
@@ -47,22 +37,7 @@ export interface IProduct extends Document {
     pairAngle: string;
     heel: string;
   };
-  reviews: IProductReview[];
 }
-
-const ProductReviewSchema = new Schema<IProductReview>(
-  {
-    id: { type: String, required: true },
-    userId: { type: String, required: true },
-    author: { type: String, required: true },
-    location: { type: String, default: "Philippines" },
-    rating: { type: Number, required: true, min: 1, max: 5 },
-    title: { type: String, required: true },
-    comment: { type: String, required: true },
-    date: { type: String, required: true },
-  },
-  { _id: false }
-);
 
 const ProductSchema = new Schema<IProduct>(
   {
@@ -103,6 +78,12 @@ const ProductSchema = new Schema<IProduct>(
       type: [String],
       default: ["US 7", "US 8", "US 9", "US 10", "US 11"],
     },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
     angles: {
       lateral: { type: String, required: true },
       outsole: { type: String, default: "" },
@@ -111,7 +92,6 @@ const ProductSchema = new Schema<IProduct>(
       pairAngle: { type: String, default: "" },
       heel: { type: String, default: "" },
     },
-    reviews: { type: [ProductReviewSchema], default: [] },
   },
   { timestamps: true }
 );

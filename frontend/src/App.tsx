@@ -29,6 +29,7 @@ import type { AngleKey, FeaturedShoe, ShoeCategory } from "./data/shoeCatalog";
 import { storeApi } from "./services/api";
 import type {
   AppUser,
+  AuditLogRecord,
   OrderRecord,
   OrderStatusType,
   PaymentMethodType,
@@ -123,6 +124,7 @@ export function App() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [products, setProducts] = useState<FeaturedShoe[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [toasts, setToasts] = useState<ToastNotice[]>([]);
 
   const [activeCategory, setActiveCategory] =
@@ -158,12 +160,19 @@ export function App() {
     void storeApi.getProducts().then(setProducts);
     void storeApi.getCurrentUser().then((sessionUser) => {
       setCurrentUser(sessionUser);
-      setBasketItems(loadPersistedBasket(sessionUser?._id));
       if (sessionUser) {
+        void storeApi.getBasket().then((serverBasket) => {
+          setBasketItems(
+            serverBasket ?? loadPersistedBasket(sessionUser._id)
+          );
+        });
         void storeApi.getOrders().then(setOrders);
         if (sessionUser.role === "admin") {
           void storeApi.getUsers().then(setUsers);
+          void storeApi.getAuditLogs().then(setAuditLogs);
         }
+      } else {
+        setBasketItems([]);
       }
     });
   }, []);
@@ -280,10 +289,13 @@ export function App() {
         const updated = [...prev];
         updated[existingIdx] = { ...updated[existingIdx], quantity: nextQty };
         notify(`Updated ${shoe.name} (${size}) to ${nextQty}`, "success");
+        void storeApi.saveBasket(updated);
         return updated;
       }
+      const next = [...prev, { shoe, size, quantity: 1 }];
       notify(`Added ${shoe.name} (${size}) to basket`, "success");
-      return [...prev, { shoe, size, quantity: 1 }];
+      void storeApi.saveBasket(next);
+      return next;
     });
   };
 
@@ -293,9 +305,13 @@ export function App() {
     nextQty: number
   ) => {
     if (nextQty <= 0) {
-      setBasketItems((prev) =>
-        prev.filter((item) => !(item.shoe.id === shoeId && item.size === size))
-      );
+      setBasketItems((prev) => {
+        const next = prev.filter(
+          (item) => !(item.shoe.id === shoeId && item.size === size)
+        );
+        if (currentUser) void storeApi.saveBasket(next);
+        return next;
+      });
       return;
     }
     const liveShoe = products.find((p) => p.id === shoeId);
@@ -304,13 +320,15 @@ export function App() {
       notify(`Stock limit reached (${maxStock} left).`, "error");
       return;
     }
-    setBasketItems((prev) =>
-      prev.map((item) =>
+    setBasketItems((prev) => {
+      const next = prev.map((item) =>
         item.shoe.id === shoeId && item.size === size
           ? { ...item, quantity: nextQty }
           : item
-      )
-    );
+      );
+      if (currentUser) void storeApi.saveBasket(next);
+      return next;
+    });
   };
 
   const handleToggleLike = async (shoe: FeaturedShoe) => {
@@ -336,9 +354,13 @@ export function App() {
   };
 
   const handleRemoveBasketItem = (shoeId: string, size: string) => {
-    setBasketItems((prev) =>
-      prev.filter((item) => !(item.shoe.id === shoeId && item.size === size))
-    );
+    setBasketItems((prev) => {
+      const next = prev.filter(
+        (item) => !(item.shoe.id === shoeId && item.size === size)
+      );
+      if (currentUser) void storeApi.saveBasket(next);
+      return next;
+    });
   };
 
   const handleOpenBasket = () => {
@@ -418,6 +440,7 @@ export function App() {
           setCurrentUser(null);
           setOrders([]);
           setUsers([]);
+          setAuditLogs([]);
           setBasketItems([]);
           notify("Signed out.", "info");
           navigate("/");
@@ -527,6 +550,10 @@ export function App() {
                   users={users}
                   products={products}
                   orders={orders}
+                  auditLogs={auditLogs}
+                  onRefreshAuditLogs={async () => {
+                    setAuditLogs(await storeApi.getAuditLogs());
+                  }}
                   onBackHome={handleNavigateHome}
                   onCreateUser={async (data) => {
                     await storeApi.createUser(data);
@@ -641,10 +668,12 @@ export function App() {
         }}
         onAuthSuccess={async (user) => {
           setCurrentUser(user);
-          setBasketItems(loadPersistedBasket(user._id));
+          const serverBasket = await storeApi.getBasket();
+          setBasketItems(serverBasket ?? loadPersistedBasket(user._id));
           setOrders(await storeApi.getOrders());
           if (user.role === "admin") {
             setUsers(await storeApi.getUsers());
+            setAuditLogs(await storeApi.getAuditLogs());
           }
           notify(`Signed in as @${user.username}`, "success");
         }}

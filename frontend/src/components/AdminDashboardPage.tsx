@@ -6,13 +6,16 @@ import {
   ArrowLeft,
   Boxes,
   Check,
+  Database,
   DollarSign,
   Edit3,
   Package,
   Palette,
   Play,
   Plus,
+  RefreshCw,
   Search,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Upload,
@@ -35,6 +38,7 @@ import type {
 } from "../data/shoeCatalog";
 import type {
   AppUser,
+  AuditLogRecord,
   CreateShoeInput,
   OrderRecord,
   OrderStatusType,
@@ -50,6 +54,8 @@ interface AdminDashboardPageProps {
   users: AppUser[];
   products: FeaturedShoe[];
   orders: OrderRecord[];
+  auditLogs: AuditLogRecord[];
+  onRefreshAuditLogs: () => Promise<void>;
   onBackHome: () => void;
   onCreateUser: (data: {
     username: string;
@@ -79,7 +85,64 @@ interface AdminDashboardPageProps {
   onDeleteOrder: (orderId: string) => Promise<void>;
 }
 
-type AdminTab = "users" | "orders" | "inventory";
+type AdminTab = "users" | "orders" | "inventory" | "audit";
+
+const SCHEMA_WIRING_NODES = [
+  {
+    name: "users",
+    pk: "_id (ObjectId)",
+    links: [
+      "likedProductIds[] → products._id",
+      "baskets.userId → _id (1:1)",
+      "orders.userId → _id (1:N)",
+      "reviews.userId → _id (1:N)",
+      "audit_logs.actorUserId → _id (1:N)",
+    ],
+  },
+  {
+    name: "products",
+    pk: "_id (ObjectId)",
+    links: [
+      "createdBy → users._id",
+      "baskets.items[].productId → _id",
+      "orders.items[].productId → _id",
+      "reviews.productId → _id (1:N)",
+    ],
+  },
+  {
+    name: "baskets",
+    pk: "_id (ObjectId)",
+    links: [
+      "userId → users._id (unique FK)",
+      "items[].productId → products._id",
+    ],
+  },
+  {
+    name: "reviews",
+    pk: "_id (ObjectId)",
+    links: [
+      "productId → products._id (FK)",
+      "userId → users._id (FK)",
+    ],
+  },
+  {
+    name: "orders",
+    pk: "_id (ObjectId)",
+    links: [
+      "userId → users._id (FK)",
+      "items[].productId → products._id (FK)",
+    ],
+  },
+  {
+    name: "audit_logs",
+    pk: "_id (ObjectId)",
+    links: [
+      "actorUserId → users._id (FK)",
+      "targetProductId → products._id (FK)",
+      "targetOrderId → orders._id (FK)",
+    ],
+  },
+] as const;
 
 const DEFAULT_SIZE_CHOICES = [
   "US 6.5",
@@ -117,6 +180,8 @@ export function AdminDashboardPage({
   users,
   products,
   orders,
+  auditLogs,
+  onRefreshAuditLogs,
   onBackHome,
   onCreateUser,
   onUpdateUser,
@@ -141,6 +206,10 @@ export function AdminDashboardPage({
   const [orderPaymentFilter, setOrderPaymentFilter] = useState<"All" | PaymentMethodType>("All");
   const [invSearch, setInvSearch] = useState("");
   const [invCategoryFilter, setInvCategoryFilter] = useState<"All" | Exclude<ShoeCategory, "All Shoes">>("All");
+  const [auditSearch, setAuditSearch] = useState("");
+  const [auditCollectionFilter, setAuditCollectionFilter] = useState<string>("All");
+  const [auditStatusFilter, setAuditStatusFilter] = useState<"All" | "SUCCESS" | "FAILURE">("All");
+  const [isRefreshingAudit, setIsRefreshingAudit] = useState(false);
 
   // User Edit / Create Modal States
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
@@ -241,6 +310,37 @@ export function AdminDashboardPage({
       );
     });
   }, [products, invSearch, invCategoryFilter]);
+
+  const filteredAuditLogs = useMemo(() => {
+    const q = auditSearch.trim().toLowerCase();
+    return auditLogs.filter((log) => {
+      if (
+        auditCollectionFilter !== "All" &&
+        log.targetCollection !== auditCollectionFilter
+      ) {
+        return false;
+      }
+      if (auditStatusFilter !== "All" && log.status !== auditStatusFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        log.actorUsername.toLowerCase().includes(q) ||
+        log.action.toLowerCase().includes(q) ||
+        log.details.toLowerCase().includes(q) ||
+        log.ipAddress.toLowerCase().includes(q)
+      );
+    });
+  }, [auditLogs, auditSearch, auditCollectionFilter, auditStatusFilter]);
+
+  const handleRefreshAudit = async () => {
+    setIsRefreshingAudit(true);
+    try {
+      await onRefreshAuditLogs();
+    } finally {
+      setIsRefreshingAudit(false);
+    }
+  };
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -510,6 +610,22 @@ export function AdminDashboardPage({
             >
               <Users className="h-4 w-4" />
               <span>Users ({users.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("audit");
+                void handleRefreshAudit();
+              }}
+              className={`flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold tracking-wide uppercase transition ${
+                activeTab === "audit"
+                  ? "bg-amber-400 text-black shadow"
+                  : "text-zinc-300 hover:text-white"
+              }`}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>IA Audit Logs ({auditLogs.length})</span>
             </button>
           </div>
         </div>
@@ -1025,6 +1141,206 @@ export function AdminDashboardPage({
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB 4: INFORMATION ASSURANCE AUDIT LOGS & SCHEMA MAP */}
+          {activeTab === "audit" && (
+            <div className="space-y-6">
+              {/* Mongoose 6-Collection Relationship Summary */}
+              <div className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.04] p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Database className="h-4 w-4 text-amber-300" />
+                    <h2 className="font-sport text-xl tracking-wide text-white uppercase italic">
+                      MONGOOSE 6-COLLECTION RELATIONAL WIRING
+                    </h2>
+                  </div>
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-300">
+                    All FKs Typed as Schema.Types.ObjectId
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {SCHEMA_WIRING_NODES.map((node) => (
+                    <div
+                      key={node.name}
+                      className="rounded-xl border border-white/10 bg-black/45 p-3.5 text-xs"
+                    >
+                      <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1.5">
+                        <span className="font-mono-tabular font-bold text-amber-300">
+                          {node.name}
+                        </span>
+                        <span className="font-mono-tabular text-[10px] text-zinc-400">
+                          PK: {node.pk}
+                        </span>
+                      </div>
+                      <ul className="space-y-1 text-[11px] text-zinc-300">
+                        {node.links.map((link) => (
+                          <li key={link} className="font-mono-tabular truncate">
+                            ↳ {link}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Live Security & CRUD Audit Trail */}
+              <div>
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+                  <h2 className="font-sport text-2xl tracking-wide text-white uppercase italic">
+                    SECURITY &amp; CRUD AUDIT TRAIL
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                      <input
+                        type="text"
+                        value={auditSearch}
+                        onChange={(e) => setAuditSearch(e.target.value)}
+                        placeholder="Search actor, action, IP..."
+                        className="rounded-full border border-white/15 bg-black/50 py-2 pr-3 pl-8 text-xs text-white focus:outline-none"
+                      />
+                    </div>
+                    <select
+                      value={auditCollectionFilter}
+                      onChange={(e) => setAuditCollectionFilter(e.target.value)}
+                      className="rounded-full border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                    >
+                      <option value="All">All Collections</option>
+                      <option value="users">users</option>
+                      <option value="products">products</option>
+                      <option value="baskets">baskets</option>
+                      <option value="reviews">reviews</option>
+                      <option value="orders">orders</option>
+                      <option value="system">system</option>
+                    </select>
+                    <select
+                      value={auditStatusFilter}
+                      onChange={(e) =>
+                        setAuditStatusFilter(
+                          e.target.value as "All" | "SUCCESS" | "FAILURE"
+                        )
+                      }
+                      className="rounded-full border border-white/15 bg-black/50 px-3 py-2 text-xs text-white focus:outline-none"
+                    >
+                      <option value="All">Status: All</option>
+                      <option value="SUCCESS">SUCCESS</option>
+                      <option value="FAILURE">FAILURE</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshAudit()}
+                      disabled={isRefreshingAudit}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:border-amber-400 hover:text-amber-300 disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${isRefreshingAudit ? "animate-spin" : ""}`}
+                      />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+
+                {filteredAuditLogs.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/35 p-8 text-center text-xs text-zinc-400">
+                    No audit log events match your current filter.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-white/15 text-zinc-400 uppercase">
+                        <tr>
+                          <th className="py-3 pr-4">Time</th>
+                          <th className="py-3 pr-4">Actor (User FK)</th>
+                          <th className="py-3 pr-4">Action</th>
+                          <th className="py-3 pr-4">Collection &amp; Ref</th>
+                          <th className="py-3 pr-4">Outcome</th>
+                          <th className="py-3 pr-4">Details</th>
+                          <th className="py-3 text-right">IP</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {filteredAuditLogs.map((log) => {
+                          const actorObj =
+                            log.actorUserId &&
+                            typeof log.actorUserId === "object"
+                              ? log.actorUserId
+                              : null;
+                          const prodObj =
+                            log.targetProductId &&
+                            typeof log.targetProductId === "object"
+                              ? log.targetProductId
+                              : null;
+                          const ordObj =
+                            log.targetOrderId &&
+                            typeof log.targetOrderId === "object"
+                              ? log.targetOrderId
+                              : null;
+                          return (
+                            <tr
+                              key={log._id}
+                              className="hover:bg-white/[0.02]"
+                            >
+                              <td className="font-mono-tabular py-3 pr-4 whitespace-nowrap text-[11px] text-zinc-400">
+                                {new Date(log.createdAt).toLocaleString()}
+                              </td>
+                              <td className="py-3 pr-4">
+                                <span className="font-semibold text-white">
+                                  @{actorObj?.username ?? log.actorUsername}
+                                </span>
+                                {actorObj?.role && (
+                                  <span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-zinc-300 uppercase">
+                                    {actorObj.role}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="font-mono-tabular py-3 pr-4 font-semibold text-amber-300">
+                                {log.action}
+                              </td>
+                              <td className="py-3 pr-4">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-mono-tabular text-[11px] font-semibold text-zinc-200">
+                                    {log.targetCollection}
+                                  </span>
+                                  {prodObj && (
+                                    <span className="text-[10px] text-zinc-400">
+                                      Shoe: {prodObj.name} ({prodObj.sku})
+                                    </span>
+                                  )}
+                                  {ordObj && (
+                                    <span className="text-[10px] text-zinc-400">
+                                      Order: {ordObj.orderNumber}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 pr-4">
+                                <span
+                                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${
+                                    log.status === "SUCCESS"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : "bg-red-500/20 text-red-300"
+                                  }`}
+                                >
+                                  {log.status}
+                                </span>
+                              </td>
+                              <td className="max-w-xs py-3 pr-4 text-zinc-300">
+                                {log.details}
+                              </td>
+                              <td className="font-mono-tabular py-3 text-right text-[11px] text-zinc-400">
+                                {log.ipAddress}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

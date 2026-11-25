@@ -1,6 +1,7 @@
-import mongoose, { Schema, type Document } from "mongoose";
+import mongoose, { Schema, type Document, type Types } from "mongoose";
 
 export interface IOrderItem {
+  productId: Types.ObjectId;
   shoeId: string;
   shoeName: string;
   size: string;
@@ -11,7 +12,7 @@ export interface IOrderItem {
 
 export interface IOrder extends Document {
   orderNumber: string;
-  userId: string;
+  userId: Types.ObjectId;
   username: string;
   userEmail: string;
   items: IOrderItem[];
@@ -32,11 +33,21 @@ export interface IOrder extends Document {
 const OrderSchema = new Schema<IOrder>(
   {
     orderNumber: { type: String, required: true, unique: true },
-    userId: { type: String, required: true },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     username: { type: String, required: true },
     userEmail: { type: String, required: true },
     items: [
       {
+        productId: {
+          type: Schema.Types.ObjectId,
+          ref: "Product",
+          required: true,
+        },
         shoeId: { type: String, required: true },
         shoeName: { type: String, required: true },
         size: { type: String, required: true },

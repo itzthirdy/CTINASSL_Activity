@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { BasketItem } from "../components/BasketDrawer";
 import { FEATURED_SHOES } from "../data/shoeCatalog";
 import type {
   AngleKey,
@@ -22,6 +23,36 @@ export interface AppUser {
   password?: string;
   role: "customer" | "admin";
   likedShoeIds: string[];
+  likedProductIds?: string[];
+  createdAt: string;
+}
+
+export interface AuditLogRecord {
+  _id: string;
+  actorUserId?:
+    | { _id: string; username: string; email: string; role: string }
+    | string
+    | null;
+  actorUsername: string;
+  action: string;
+  targetCollection:
+    | "users"
+    | "products"
+    | "baskets"
+    | "reviews"
+    | "orders"
+    | "system";
+  targetProductId?:
+    | { _id: string; id: string; name: string; sku: string }
+    | string
+    | null;
+  targetOrderId?:
+    | { _id: string; orderNumber: string; status: string }
+    | string
+    | null;
+  status: "SUCCESS" | "FAILURE";
+  details: string;
+  ipAddress: string;
   createdAt: string;
 }
 
@@ -811,6 +842,44 @@ export const storeApi = {
       const next = readLocalOrders().filter((o) => o._id !== orderId);
       writeLocalOrders(next);
       return next;
+    }
+  },
+
+  // --- PERSISTENT MONGODB BASKET SYNC ---
+  async getBasket(): Promise<BasketItem[] | null> {
+    try {
+      const res = await httpClient.get<{ items: BasketItem[] }>("/basket");
+      return Array.isArray(res.data?.items) ? res.data.items : [];
+    } catch (err) {
+      if (isNetworkFailure(err)) return null;
+      return [];
+    }
+  },
+
+  async saveBasket(items: BasketItem[]): Promise<BasketItem[] | null> {
+    const compact = items.map((item) => ({
+      shoeId: item.shoe.id,
+      size: item.size,
+      quantity: item.quantity,
+    }));
+    try {
+      const res = await httpClient.put<{ items: BasketItem[] }>("/basket", {
+        items: compact,
+      });
+      return Array.isArray(res.data?.items) ? res.data.items : items;
+    } catch (err) {
+      if (isNetworkFailure(err)) return null;
+      return null;
+    }
+  },
+
+  // --- INFORMATION ASSURANCE AUDIT LOGS (Admin Only) ---
+  async getAuditLogs(): Promise<AuditLogRecord[]> {
+    try {
+      const res = await httpClient.get<AuditLogRecord[]>("/audit-logs");
+      return Array.isArray(res.data) ? res.data : [];
+    } catch {
+      return [];
     }
   },
 };

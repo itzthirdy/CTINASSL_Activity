@@ -1,14 +1,14 @@
 import "dotenv/config";
 import app from "./app.js";
 import { connectDatabase } from "./config/database.js";
-import { ensureSeedUsers } from "./config/seedBootstrap.js";
+import { ensureSeedDatabase } from "./config/seedBootstrap.js";
 
 const port = Number(process.env.PORT ?? 8000);
 
 async function startServer(): Promise<void> {
   try {
     await connectDatabase();
-    await ensureSeedUsers();
+    await ensureSeedDatabase();
 
     app.listen(port, () => {
       console.log(`Sole Purpose API running on http://localhost:${port}`);
